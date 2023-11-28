@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
-	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"golang.org/x/crypto/bcrypt"
@@ -20,7 +19,6 @@ type UserRepository struct {
 
 func (r *UserRepository) Register(user *models.User) (*mongo.InsertOneResult, error) {
 	password := md5Func(user.Password)
-	fmt.Print(password)
 	user.Password = password
 	result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionUser).InsertOne(context.TODO(), user)
 	return result, err
@@ -29,7 +27,17 @@ func (r *UserRepository) Register(user *models.User) (*mongo.InsertOneResult, er
 func (r *UserRepository) FindOne(user *models.User) (models.User, error) {
 	result := models.User{}
 	password := md5Func(user.Password)
-	err := r.DB.Database("dbitems").Collection(collectionUser).FindOne(context.TODO(), bson.D{{"email", user.Email}, {"password", password}}).Decode(&result)
+	err := r.DB.Database("dbitems").Collection(collectionUser).FindOne(context.TODO(), bson.D{
+		{"email", user.Email},
+		{"password", password},
+		{"active", true},
+	}).Decode(&result)
+	return result, err
+}
+
+func (r *UserRepository) FindMe(user *models.User) (models.User, error) {
+	result := models.User{}
+	err := r.DB.Database("dbitems").Collection(collectionUser).FindOne(context.TODO(), bson.D{{"_id", user.Id}}).Decode(&result)
 	return result, err
 }
 

@@ -4,7 +4,6 @@ import (
 	"api-go/internal/models"
 	"api-go/internal/repository"
 	"encoding/json"
-	"fmt"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/go-chi/render"
@@ -37,6 +36,7 @@ func (repo *Repository) FindAllItems(w http.ResponseWriter, r *http.Request) {
 }
 
 func (repo *Repository) FindOneItem(w http.ResponseWriter, r *http.Request) {
+	_, claims, _ := jwtauth.FromContext(r.Context())
 	idstr := chi.URLParam(r, "id")
 	_id, errP := primitive.ObjectIDFromHex(idstr)
 	if errP != nil {
@@ -50,12 +50,16 @@ func (repo *Repository) FindOneItem(w http.ResponseWriter, r *http.Request) {
 		render.JSON(w, r, map[string]string{"message": "NOT_FOUND"})
 		return
 	}
+	if result.Private && claims["id"] != result.UserId {
+		w.WriteHeader(404)
+		render.JSON(w, r, map[string]string{"message": "NOT_FOUND"})
+		return
+	}
 	render.JSON(w, r, result)
 }
 
 func (repo *Repository) AddItem(w http.ResponseWriter, r *http.Request) {
 	_, claims, _ := jwtauth.FromContext(r.Context())
-	fmt.Print(claims["id"])
 	decoder := json.NewDecoder(r.Body)
 	var item models.Item
 	if err := decoder.Decode(&item); err != nil {
@@ -98,6 +102,25 @@ func (repo *Repository) UpdateItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	render.JSON(w, r, saveItem)
+}
+
+func (repo *Repository) DeleteItem(w http.ResponseWriter, r *http.Request) {
+	idstr := chi.URLParam(r, "id")
+	_, claims, _ := jwtauth.FromContext(r.Context())
+	_id, errP := primitive.ObjectIDFromHex(idstr)
+	if errP != nil {
+		w.WriteHeader(400)
+		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
+		return
+	}
+
+	result, err := repo.Items.DeleteItem(_id, claims["id"])
+	if err != nil {
+		w.WriteHeader(400)
+		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
+		return
+	}
+	render.JSON(w, r, result)
 }
 
 func getQuery(r *http.Request, query string, d int64) int64 {

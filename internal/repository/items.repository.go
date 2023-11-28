@@ -3,7 +3,6 @@ package repository
 import (
 	"api-go/internal/models"
 	"context"
-	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -62,6 +61,10 @@ func (r *ItemsRepository) UpdateItem(item models.Item, _id primitive.ObjectID) (
 	result := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection("items").FindOneAndUpdate(context.TODO(), bson.D{{"_id", _id}}, update, &opt)
 	doc := models.Item{}
 	err := result.Decode(&doc)
-	fmt.Print(doc)
 	return doc, err
+}
+
+func (r *ItemsRepository) DeleteItem(_id primitive.ObjectID, user_id interface{}) (*mongo.DeleteResult, error) {
+	result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).DeleteOne(context.TODO(), bson.D{{"_id", _id}, {"user_id", user_id}})
+	return result, err
 }

@@ -4,6 +4,7 @@ import (
 	"api-go/internal/models"
 	"api-go/internal/repository"
 	"encoding/json"
+	"github.com/go-chi/jwtauth/v5"
 	"github.com/go-chi/render"
 	"net/http"
 )
@@ -32,10 +33,15 @@ func (repo *RepositoryUser) RegisterController(w http.ResponseWriter, r *http.Re
 	render.JSON(w, r, save)
 }
 
+func (repo *RepositoryUser) Me(w http.ResponseWriter, r *http.Request) {
+	_, claims, _ := jwtauth.FromContext(r.Context())
+	render.JSON(w, r, claims)
+}
+
 func (repo *RepositoryUser) AuthController(w http.ResponseWriter, r *http.Request) {
 	user, err, errs := validateUser(r)
 	if err != nil {
-		w.WriteHeader(400)
+		w.WriteHeader(401)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
@@ -45,13 +51,13 @@ func (repo *RepositoryUser) AuthController(w http.ResponseWriter, r *http.Reques
 	}
 	result, err := repo.User.FindOne(user)
 	if err != nil {
-		w.WriteHeader(400)
+		w.WriteHeader(401)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
 	token, err := result.GenerateJWT()
 	if err != nil {
-		w.WriteHeader(400)
+		w.WriteHeader(401)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}

@@ -27,7 +27,8 @@ func main() {
 	r := chi.NewRouter()
 	Cors := cors.New(cors.Options{
 		AllowedOrigins: []string{"*"},
-		AllowedMethods: []string{"GET", "POST", "PUT"},
+		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE"},
+		AllowedHeaders: []string{"*"},
 	})
 	r.Use(Cors.Handler)
 
@@ -49,6 +50,8 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(jwtauth.Authenticator(tokenAuth))
 		r.Get("/items", itemsHandle.FindAllItems)
+		r.Delete("/items/{id}", itemsHandle.DeleteItem)
+		r.Get("/user/me", userHandle.Me)
 	})
 
 	r.Get("/", helloWord)

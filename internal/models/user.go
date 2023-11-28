@@ -12,6 +12,7 @@ type User struct {
 	Id       primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	Email    string             `json:"email" bson:"email" validate:"email,required"`
 	Password string             `json:"password" bson:"password" validate:"required,min=6"`
+	Name     string             `json:"name" bson:"name" required:"required"`
 	Active   bool
 }
 
@@ -47,6 +48,7 @@ func (u *User) GenerateJWT() (string, error) {
 		"id":     u.Id,
 		"email":  u.Email,
 		"active": u.Active,
+		"name":   u.Name,
 		"exp":    time.Now().Add(time.Hour * 1).Unix(),
 	}
 
