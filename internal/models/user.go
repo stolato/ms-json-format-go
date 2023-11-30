@@ -42,19 +42,30 @@ func (u *User) Validate() []ErrorsHandle {
 	return validationErrors
 }
 
-func (u *User) GenerateJWT() (string, error) {
+func (u *User) GenerateJWT() (map[string]string, error) {
 	secret := os.Getenv("JWT_SECRET")
 	claims := jwt.MapClaims{
-		"id":     u.Id,
-		"email":  u.Email,
-		"active": u.Active,
-		"name":   u.Name,
-		"exp":    time.Now().Add(time.Hour * 1).Unix(),
+		"id":    u.Id,
+		"email": u.Email,
+		"name":  u.Name,
+		"exp":   time.Now().Add(time.Second * 1).Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
 	tokenString, err := token.SignedString([]byte(secret))
 
-	return tokenString, err
+	refreshClaims := jwt.MapClaims{
+		"id":  u.Id,
+		"exp": time.Now().Add(time.Hour * 24).Unix(),
+	}
+
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
+
+	refreshString, err := refreshToken.SignedString([]byte(secret))
+
+	return map[string]string{
+		"token":         tokenString,
+		"refresh_token": refreshString,
+	}, err
 }

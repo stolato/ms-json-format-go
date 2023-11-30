@@ -4,9 +4,13 @@ import (
 	"api-go/internal/models"
 	"api-go/internal/repository"
 	"encoding/json"
+	"fmt"
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/go-chi/render"
+	"github.com/golang-jwt/jwt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"net/http"
+	"os"
 )
 
 type RepositoryUser struct {
@@ -61,7 +65,47 @@ func (repo *RepositoryUser) AuthController(w http.ResponseWriter, r *http.Reques
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
-	render.JSON(w, r, map[string]string{"token": token})
+	render.JSON(w, r, token)
+}
+
+func (repo *RepositoryUser) RefreshToken(w http.ResponseWriter, r *http.Request) {
+	type tokenReqBody struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	var refresh tokenReqBody
+	if err := decoder.Decode(&refresh); err != nil {
+		w.WriteHeader(401)
+		render.JSON(w, r, map[string]string{"message": err.Error()})
+		return
+	}
+	token, _ := jwt.Parse(refresh.RefreshToken, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(os.Getenv("JWT_SECRET")), nil
+	})
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		id := fmt.Sprintf("%v", claims["id"])
+		_id, _ := primitive.ObjectIDFromHex(id)
+		userModel := models.User{
+			Id:     _id,
+			Active: true,
+		}
+		user, err := repo.User.FindMe(&userModel)
+		if err != nil {
+			w.WriteHeader(401)
+			render.JSON(w, r, map[string]string{"message": err.Error()})
+			return
+		}
+		token, err := user.GenerateJWT()
+		render.JSON(w, r, token)
+		return
+	}
+
+	w.WriteHeader(401)
+	render.JSON(w, r, map[string]string{"message": "ERRO"})
+	return
 }
 
 func validateUser(r *http.Request) (*models.User, error, []models.ErrorsHandle) {

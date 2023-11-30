@@ -20,6 +20,7 @@ type UserRepository struct {
 func (r *UserRepository) Register(user *models.User) (*mongo.InsertOneResult, error) {
 	password := md5Func(user.Password)
 	user.Password = password
+	user.Active = true
 	result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionUser).InsertOne(context.TODO(), user)
 	return result, err
 }

@@ -42,6 +42,7 @@ func main() {
 	//r.Get("/items", itemsHandle.FindAllItems)
 	r.Use(jwtauth.Verifier(tokenAuth))
 	r.Post("/register", userHandle.RegisterController)
+	r.Post("/refresh", userHandle.RefreshToken)
 	r.Post("/auth", userHandle.AuthController)
 	r.Get("/items/{id}", itemsHandle.FindOneItem)
 	r.Post("/items", itemsHandle.AddItem)
