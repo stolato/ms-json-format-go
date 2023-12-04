@@ -10,7 +10,6 @@ import (
 	"github.com/go-chi/render"
 	"github.com/joho/godotenv"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
