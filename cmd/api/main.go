@@ -21,7 +21,7 @@ var tokenAuth *jwtauth.JWTAuth
 
 func main() {
 	if err := godotenv.Load(".env"); err != nil {
-		log.Fatal(err)
+		slog.Info(err.Error())
 	}
 	tokenAuth = jwtauth.New("HS256", []byte(os.Getenv("JWT_SECRET")), nil, jwt.WithAcceptableSkew(30*time.Second))
 	r := chi.NewRouter()
