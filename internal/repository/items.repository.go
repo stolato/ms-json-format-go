@@ -38,7 +38,12 @@ func (r *ItemsRepository) FindAll(filter bson.D, findOptions *options.FindOption
 
 func (r *ItemsRepository) FindOne(_id primitive.ObjectID) (models.Item, error) {
 	result := models.Item{}
-	err := r.DB.Database("dbitems").Collection(collection).FindOne(context.TODO(), bson.D{{"_id", _id}}).Decode(&result)
+	err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).FindOne(context.TODO(), bson.D{{"_id", _id}}).Decode(&result)
+	r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).FindOneAndUpdate(context.TODO(), bson.D{{"_id", result.Id}}, bson.D{{"$set", bson.D{
+		{"views", result.Views + 1},
+		{"expirateAt", time.Now().AddDate(0, 0, 7)},
+		{"updateAt", time.Now()},
+	}}})
 	return result, err
 }
 
@@ -51,6 +56,7 @@ func (r *ItemsRepository) UpdateItem(item models.Item, _id primitive.ObjectID) (
 	update := bson.D{{"$set", bson.D{
 		{"json", item.Json},
 		{"expirateAt", time.Now().AddDate(0, 0, 7)},
+		{"updateAt", time.Now()},
 	}}}
 	upsert := true
 	after := options.After

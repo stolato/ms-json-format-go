@@ -15,4 +15,5 @@ type Item struct {
 	Private    bool               `json:"private" bson:"private"`
 	ExpirateAt time.Time          `json:"expirateAt" bson:"expirateAt"`
 	Name       string             `json:"name" bson:"name"`
+	Views      int32              `json:"views" bson:"views"`
 }

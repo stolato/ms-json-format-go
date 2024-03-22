@@ -66,5 +66,5 @@ func main() {
 }
 
 func helloWord(w http.ResponseWriter, r *http.Request) {
-	render.JSON(w, r, "Hi!! :D")
+	render.JSON(w, r, map[string]string{"name": "MS Items", "version": "1.0.1"})
 }
