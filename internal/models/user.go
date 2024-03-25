@@ -14,6 +14,7 @@ type User struct {
 	Password string             `json:"password" bson:"password" validate:"required,min=6"`
 	Name     string             `json:"name" bson:"name" required:"required"`
 	Active   bool
+	Setting  string `json:"settings" bson:"settings"`
 }
 
 type ErrorsHandle struct {
@@ -48,7 +49,7 @@ func (u *User) GenerateJWT() (map[string]string, error) {
 		"id":    u.Id,
 		"email": u.Email,
 		"name":  u.Name,
-		"exp":   time.Now().Add(time.Hour * 1).Unix(),
+		"exp":   time.Now().Add(time.Hour * 24).Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -57,7 +58,7 @@ func (u *User) GenerateJWT() (map[string]string, error) {
 
 	refreshClaims := jwt.MapClaims{
 		"id":  u.Id,
-		"exp": time.Now().Add(time.Hour * 24).Unix(),
+		"exp": time.Now().Add(time.Hour * 48).Unix(),
 	}
 
 	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)

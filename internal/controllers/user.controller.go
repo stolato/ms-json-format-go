@@ -42,6 +42,31 @@ func (repo *RepositoryUser) Me(w http.ResponseWriter, r *http.Request) {
 	render.JSON(w, r, claims)
 }
 
+func (repo *RepositoryUser) UpdateSettings(w http.ResponseWriter, r *http.Request) {
+	decoder := json.NewDecoder(r.Body)
+	_, claims, _ := jwtauth.FromContext(r.Context())
+	id := fmt.Sprintf("%v", claims["id"])
+	var settings models.User
+	err := decoder.Decode(&settings)
+	if err != nil {
+		w.WriteHeader(400)
+		render.JSON(w, r, map[string]string{"message": err.Error()})
+		return
+	}
+	repo.User.UpdateSettings(id, settings.Setting)
+	render.JSON(w, r, settings)
+}
+
+func (repo *RepositoryUser) GetSettings(w http.ResponseWriter, r *http.Request) {
+	_, claims, _ := jwtauth.FromContext(r.Context())
+	id := fmt.Sprintf("%v", claims["id"])
+	_id, _ := primitive.ObjectIDFromHex(id)
+	mUser := models.User{Id: _id}
+	user, _ := repo.User.FindMe(&mUser)
+	render.JSON(w, r, map[string]string{"settings": user.Setting})
+	return
+}
+
 func (repo *RepositoryUser) AuthController(w http.ResponseWriter, r *http.Request) {
 	user, err, errs := validateUser(r)
 	if err != nil {

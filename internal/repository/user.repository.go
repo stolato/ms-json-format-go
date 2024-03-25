@@ -6,9 +6,12 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 	"os"
+	"time"
 )
 
 var collectionUser = "users"
@@ -34,6 +37,21 @@ func (r *UserRepository) FindOne(user *models.User) (models.User, error) {
 		{"active", true},
 	}).Decode(&result)
 	return result, err
+}
+
+func (r *UserRepository) UpdateSettings(userId string, settings string) {
+	update := bson.D{{"$set", bson.D{
+		{"settings", settings},
+		{"updateAt", time.Now()},
+	}}}
+	upsert := true
+	after := options.After
+	opt := options.FindOneAndUpdateOptions{
+		ReturnDocument: &after,
+		Upsert:         &upsert,
+	}
+	_id, _ := primitive.ObjectIDFromHex(userId)
+	r.DB.Database("dbitems").Collection(collectionUser).FindOneAndUpdate(context.TODO(), bson.D{{"_id", _id}}, update, &opt)
 }
 
 func (r *UserRepository) FindMe(user *models.User) (models.User, error) {

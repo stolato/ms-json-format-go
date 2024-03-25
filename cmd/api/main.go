@@ -52,6 +52,8 @@ func main() {
 		r.Get("/items", itemsHandle.FindAllItems)
 		r.Delete("/items/{id}", itemsHandle.DeleteItem)
 		r.Get("/user/me", userHandle.Me)
+		r.Put("/user/settings", userHandle.UpdateSettings)
+		r.Get("/user/settings", userHandle.GetSettings)
 	})
 
 	r.Get("/", helloWord)
