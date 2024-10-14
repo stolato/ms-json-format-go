@@ -9,7 +9,7 @@ ENV GOPROXY=https://goproxy.cn
 
 RUN go mod download
 
-RUN go build -o main cmd/api/main.go
+RUN go build -o main cmd/main.go
 
 EXPOSE 8000
 

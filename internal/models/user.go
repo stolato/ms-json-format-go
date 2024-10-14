@@ -1,11 +1,12 @@
 package models
 
 import (
+	"os"
+	"time"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/golang-jwt/jwt"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"os"
-	"time"
 )
 
 type User struct {

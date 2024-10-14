@@ -1,34 +1,45 @@
 package controllers
 
 import (
+	"api-go/internal/midleware"
 	"api-go/internal/models"
 	"api-go/internal/repository"
 	"encoding/json"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/jwtauth/v5"
-	"github.com/go-chi/render"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"log"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/jwtauth/v5"
+	"github.com/go-chi/render"
+	"github.com/prometheus/client_golang/prometheus"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type Repository struct {
-	Items repository.ItemsRepository
+	Duration prometheus.HistogramVec
+	Summary  prometheus.Summary
+	MainResp repository.Respositorys
 }
 
 func (repo *Repository) FindAllItems(w http.ResponseWriter, r *http.Request) {
 	_, claims, _ := jwtauth.FromContext(r.Context())
 	limit := getQuery(r, "limit", 20)
 	page := getQuery(r, "page", 0)
-	findOptions := options.Find()
-	findOptions.SetLimit(limit)
-	findOptions.SetSkip(limit * page)
-	results, err := repo.Items.FindAll(bson.D{{"user_id", claims["id"]}}, findOptions)
+	resultsOrgs, err := repo.MainResp.Organization.FindAllMyOrgs(claims["id"], 0, 100)
+	var orgsId []string
+	for _, value := range resultsOrgs {
+		orgsId = append(orgsId, value.Id.Hex())
+	}
+	results, err := repo.MainResp.Items.FindAll(bson.D{{
+		"$or", bson.A{
+			bson.D{{"user_id", claims["id"]}},
+			bson.D{{"organizationId", bson.D{{"$in", orgsId}}}},
+		},
+	}}, page, limit)
 	if err != nil {
 		slog.Error(err.Error())
 	}
@@ -36,25 +47,37 @@ func (repo *Repository) FindAllItems(w http.ResponseWriter, r *http.Request) {
 }
 
 func (repo *Repository) FindOneItem(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	status := "200"
 	_, claims, _ := jwtauth.FromContext(r.Context())
 	idstr := chi.URLParam(r, "id")
 	_id, errP := primitive.ObjectIDFromHex(idstr)
 	if errP != nil {
 		w.WriteHeader(403)
+		status = "403"
 		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
 		return
 	}
-	result, err := repo.Items.FindOne(_id)
+	result, err := repo.MainResp.Items.FindOne(_id)
 	if err != nil {
 		w.WriteHeader(404)
+		status = "404"
 		render.JSON(w, r, map[string]string{"message": "NOT_FOUND"})
 		return
 	}
-	if result.Private && claims["id"] != result.UserId {
+	resultsOrgs, err := repo.MainResp.Organization.FindAllMyOrgs(claims["id"], 0, 100)
+	var orgsId []string
+	for _, value := range resultsOrgs {
+		orgsId = append(orgsId, value.Id.Hex())
+	}
+	if result.Private && claims["id"] != result.UserId || !contains(orgsId, result.OrganizationId) {
 		w.WriteHeader(404)
+		status = "404"
 		render.JSON(w, r, map[string]string{"message": "NOT_FOUND"})
 		return
 	}
+	defer repo.Duration.WithLabelValues(midleware.GetRoutePattern(r), r.Method, status).Observe(time.Since(start).Seconds())
+	defer repo.Summary.Observe(time.Since(start).Seconds())
 	render.JSON(w, r, result)
 }
 
@@ -71,7 +94,7 @@ func (repo *Repository) AddItem(w http.ResponseWriter, r *http.Request) {
 	item.Ip = ReadUserIP(r)
 	item.CreatedAt = time.Now()
 	item.UpdateAt = time.Now()
-	saveItem, err := repo.Items.AddItem(item)
+	saveItem, err := repo.MainResp.Items.AddItem(item)
 	if err != nil {
 		w.WriteHeader(400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
@@ -95,7 +118,7 @@ func (repo *Repository) UpdateItem(w http.ResponseWriter, r *http.Request) {
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
-	saveItem, err := repo.Items.UpdateItem(item, _id)
+	saveItem, err := repo.MainResp.Items.UpdateItem(item, _id)
 	if err != nil {
 		w.WriteHeader(400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
@@ -113,8 +136,7 @@ func (repo *Repository) DeleteItem(w http.ResponseWriter, r *http.Request) {
 		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
 		return
 	}
-
-	result, err := repo.Items.DeleteItem(_id, claims["id"])
+	result, err := repo.MainResp.Items.DeleteItem(_id, claims["id"])
 	if err != nil {
 		w.WriteHeader(400)
 		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
@@ -144,4 +166,13 @@ func ReadUserIP(r *http.Request) string {
 		IPAddress = r.RemoteAddr
 	}
 	return IPAddress
+}
+
+func contains(s []string, e string) bool {
+	for _, a := range s {
+		if a == e {
+			return true
+		}
+	}
+	return false
 }

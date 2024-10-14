@@ -5,12 +5,14 @@ import (
 	"api-go/internal/repository"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"os"
+
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/go-chi/render"
 	"github.com/golang-jwt/jwt"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"net/http"
-	"os"
 )
 
 type RepositoryUser struct {
@@ -20,21 +22,22 @@ type RepositoryUser struct {
 func (repo *RepositoryUser) RegisterController(w http.ResponseWriter, r *http.Request) {
 	user, err, errs := validateUser(r)
 	if err != nil {
-		w.WriteHeader(400)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
 	if errs != nil {
-		render.JSON(w, r, err)
+		render.Status(r, 400)
+		render.JSON(w, r, errs)
 		return
 	}
-	save, err := repo.User.Register(user)
+	_, err = repo.User.Register(user)
 	if err != nil {
-		w.WriteHeader(400)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
-	render.JSON(w, r, save)
+	render.JSON(w, r, map[string]string{"message": "Success"})
 }
 
 func (repo *RepositoryUser) Me(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +52,7 @@ func (repo *RepositoryUser) UpdateSettings(w http.ResponseWriter, r *http.Reques
 	var settings models.User
 	err := decoder.Decode(&settings)
 	if err != nil {
-		w.WriteHeader(400)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
@@ -70,7 +73,7 @@ func (repo *RepositoryUser) GetSettings(w http.ResponseWriter, r *http.Request) 
 func (repo *RepositoryUser) AuthController(w http.ResponseWriter, r *http.Request) {
 	user, err, errs := validateUser(r)
 	if err != nil {
-		w.WriteHeader(401)
+		render.Status(r, 401)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
@@ -78,15 +81,20 @@ func (repo *RepositoryUser) AuthController(w http.ResponseWriter, r *http.Reques
 		render.JSON(w, r, err)
 		return
 	}
-	result, err := repo.User.FindOne(user)
+	password := repository.Md5Func(user.Password)
+	result, err := repo.User.FindOne(user, bson.D{
+		{"email", user.Email},
+		{"password", password},
+		{"active", true},
+	})
 	if err != nil {
-		w.WriteHeader(401)
+		render.Status(r, 401)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
 	token, err := result.GenerateJWT()
 	if err != nil {
-		w.WriteHeader(401)
+		render.Status(r, 401)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
