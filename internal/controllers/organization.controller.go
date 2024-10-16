@@ -115,3 +115,22 @@ func (repo *OrganizationController) AddUser(w http.ResponseWriter, r *http.Reque
 	}
 	render.JSON(w, r, saveItem)
 }
+
+func (repo *OrganizationController) RemoveUser(w http.ResponseWriter, r *http.Request) {
+	_, claims, _ := jwtauth.FromContext(r.Context())
+	idstr := chi.URLParam(r, "id")
+	userId := chi.URLParam(r, "userId")
+	_id, errP := primitive.ObjectIDFromHex(idstr)
+	if errP != nil {
+		render.Status(r, 400)
+		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
+		return
+	}
+	removeUser, err := repo.Repo.Organization.RemoveUser(userId, _id, claims["id"])
+	if err != nil {
+		render.Status(r, 400)
+		render.JSON(w, r, map[string]string{"message": err.Error()})
+		return
+	}
+	render.JSON(w, r, removeUser)
+}

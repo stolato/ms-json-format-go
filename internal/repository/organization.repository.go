@@ -5,6 +5,7 @@ import (
 	"api-go/internal/validation/dtos"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 
@@ -77,7 +78,6 @@ func (r *OrganizationRepository) AddUser(user dtos.AddUserOrganizationDTO, id pr
 	errUser := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionUser).FindOne(context.TODO(),
 		bson.D{{"email", user.Email}, {"active", true}},
 	).Decode(&userCheck)
-	log.Println(userCheck)
 	if errUser == mongo.ErrNoDocuments {
 		return checkToOrg, errors.New("user not found or not active")
 	}
@@ -102,10 +102,32 @@ func (r *OrganizationRepository) AddUser(user dtos.AddUserOrganizationDTO, id pr
 	result := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionTime).FindOneAndUpdate(
 		context.TODO(),
 		bson.D{{"_id", id}, {"ownerId", ownerID}},
-		bson.D{{"$push", bson.D{{"users", bson.D{{"_id", userCheck.Id.Hex()}}}}}},
+		bson.D{{"$push", bson.D{{"users", bson.D{{"_id", userCheck.Id.Hex()}, {"name", userCheck.Name}, {"email", userCheck.Email}}}}}},
 		&opt,
 	)
 	doc := models.OrganizationModel{}
 	err = result.Decode(&doc)
+	return doc, err
+}
+
+func (r *OrganizationRepository) RemoveUser(userId string, id primitive.ObjectID, ownerID interface{}) (models.OrganizationModel, error) {
+	doc := models.OrganizationModel{}
+	ownerID = fmt.Sprintf("%s", ownerID)
+	if userId == ownerID {
+		return doc, errors.New("not possbile remove")
+	}
+	upsert := true
+	after := options.After
+	opt := options.FindOneAndUpdateOptions{
+		ReturnDocument: &after,
+		Upsert:         &upsert,
+	}
+	result := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionTime).FindOneAndUpdate(
+		context.TODO(),
+		bson.D{{"_id", id}, {"ownerId", ownerID}},
+		bson.D{{"$pull", bson.D{{"users", bson.D{{"_id", userId}}}}}},
+		&opt,
+	)
+	err := result.Decode(&doc)
 	return doc, err
 }

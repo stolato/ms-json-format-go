@@ -73,6 +73,7 @@ func (router *RouterAPI) InitRouter() {
 		r.Post("/organization", organizationHandle.AddTime)
 		r.Delete("/organization/{id}", organizationHandle.DeleteOrganization)
 		r.Post("/organization/{id}/users", organizationHandle.AddUser)
+		r.Delete("/organization/{id}/users/{userId}", organizationHandle.RemoveUser)
 	})
 
 	r.Get("/", metricsHello.HelloWord)
