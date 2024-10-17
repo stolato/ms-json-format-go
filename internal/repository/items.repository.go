@@ -90,14 +90,19 @@ func (r *ItemsRepository) DeleteItem(_id primitive.ObjectID, user_id interface{}
 			{},
 		}).Decode(&org)
 		if err == mongo.ErrNoDocuments {
-			result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).DeleteOne(context.TODO(), bson.D{{"_id", _id}, {"user_id", user_id}})
+			result, err := r.delete(bson.D{{"_id", _id}, {"user_id", user_id}})
 			return result, err
 		}
 		if org.OwnerId == user_id {
-			result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).DeleteOne(context.TODO(), bson.D{{"_id", _id}})
+			result, err := r.delete(bson.D{{"_id", _id}})
 			return result, err
 		}
 	}
-	result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).DeleteOne(context.TODO(), bson.D{{"_id", _id}, {"user_id", user_id}})
+	result, err := r.delete(bson.D{{"_id", _id}, {"user_id", user_id}})
+	return result, err
+}
+
+func (r *ItemsRepository) delete(filter bson.D) (*mongo.DeleteResult, error) {
+	result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).DeleteOne(context.TODO(), filter)
 	return result, err
 }
