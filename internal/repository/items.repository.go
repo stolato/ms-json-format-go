@@ -83,6 +83,21 @@ func (r *ItemsRepository) UpdateItem(item models.Item, _id primitive.ObjectID) (
 }
 
 func (r *ItemsRepository) DeleteItem(_id primitive.ObjectID, user_id interface{}) (*mongo.DeleteResult, error) {
+	item, err := r.FindOne(_id)
+	if item.OrganizationId != "" {
+		org := models.OrganizationModel{}
+		err = r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionTime).FindOne(context.TODO(), bson.D{
+			{},
+		}).Decode(&org)
+		if err == mongo.ErrNoDocuments {
+			result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).DeleteOne(context.TODO(), bson.D{{"_id", _id}, {"user_id", user_id}})
+			return result, err
+		}
+		if org.OwnerId == user_id {
+			result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).DeleteOne(context.TODO(), bson.D{{"_id", _id}})
+			return result, err
+		}
+	}
 	result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).DeleteOne(context.TODO(), bson.D{{"_id", _id}, {"user_id", user_id}})
 	return result, err
 }
