@@ -18,4 +18,5 @@ func (m *MetricsHello) HelloWord(w http.ResponseWriter, r *http.Request) {
 	render.JSON(w, r, map[string]string{"name": "MS Items", "version": "1.0.1"})
 	m.Duration.WithLabelValues("/", "GET", "200").Observe(time.Since(start).Seconds())
 	m.Summary.Observe(time.Since(start).Seconds())
+	return
 }

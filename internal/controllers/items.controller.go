@@ -34,6 +34,9 @@ func (repo *Repository) FindAllItems(w http.ResponseWriter, r *http.Request) {
 	for _, value := range resultsOrgs {
 		orgsId = append(orgsId, value.Id.Hex())
 	}
+	if len(orgsId) == 0 {
+		orgsId = append(orgsId, "")
+	}
 	results, err := repo.MainResp.Items.FindAll(bson.D{{
 		"$or", bson.A{
 			bson.D{{"user_id", claims["id"]}},
@@ -53,14 +56,14 @@ func (repo *Repository) FindOneItem(w http.ResponseWriter, r *http.Request) {
 	idstr := chi.URLParam(r, "id")
 	_id, errP := primitive.ObjectIDFromHex(idstr)
 	if errP != nil {
-		w.WriteHeader(403)
+		render.Status(r, 403)
 		status = "403"
 		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
 		return
 	}
 	result, err := repo.MainResp.Items.FindOne(_id)
 	if err != nil {
-		w.WriteHeader(404)
+		render.Status(r, 404)
 		status = "404"
 		render.JSON(w, r, map[string]string{"message": "NOT_FOUND"})
 		return
@@ -70,10 +73,18 @@ func (repo *Repository) FindOneItem(w http.ResponseWriter, r *http.Request) {
 	for _, value := range resultsOrgs {
 		orgsId = append(orgsId, value.Id.Hex())
 	}
-	if result.Private && claims["id"] != result.UserId || !contains(orgsId, result.OrganizationId) {
-		w.WriteHeader(404)
+
+	if result.OrganizationId != "" && !contains(orgsId, result.OrganizationId) {
+		render.Status(r, 404)
 		status = "404"
-		render.JSON(w, r, map[string]string{"message": "NOT_FOUND"})
+		render.JSON(w, r, map[string]string{"message": "NOT_FOUND_ORG"})
+		return
+	}
+
+	if result.Private && claims["id"] != result.UserId {
+		render.Status(r, 404)
+		status = "404"
+		render.JSON(w, r, map[string]string{"message": "NOT_FOUND_ORG"})
 		return
 	}
 	defer repo.Duration.WithLabelValues(midleware.GetRoutePattern(r), r.Method, status).Observe(time.Since(start).Seconds())
