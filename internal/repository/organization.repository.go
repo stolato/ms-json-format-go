@@ -38,6 +38,15 @@ func (r *OrganizationRepository) FindAll(filter bson.D, findOptions *options.Fin
 	return results, err
 }
 
+func (r *OrganizationRepository) FindOne(filter bson.D) (models.OrganizationModel, error) {
+	result := models.OrganizationModel{}
+	err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionTime).FindOne(context.TODO(), filter).Decode(&result)
+	if err == mongo.ErrNoDocuments {
+		return result, errors.New("not find org")
+	}
+	return result, err
+}
+
 func (r *OrganizationRepository) FindAllMyOrgs(_id interface{}, page int64, limit int64) ([]models.OrganizationModel, error) {
 	findOptions := options.Find()
 	findOptions.SetLimit(limit)

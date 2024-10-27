@@ -18,4 +18,5 @@ type Item struct {
 	ExpirateAt     time.Time          `json:"expirateAt" bson:"expirateAt"`
 	Name           string             `json:"name" bson:"name"`
 	Views          int32              `json:"views" bson:"views"`
+	Organization   OrganizationModel  `json:"organization" bson:"organization"`
 }

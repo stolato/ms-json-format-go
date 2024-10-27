@@ -101,6 +101,36 @@ func (repo *Repository) AddItem(w http.ResponseWriter, r *http.Request) {
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
+	if item.OrganizationId != "" {
+		_id, errP := primitive.ObjectIDFromHex(item.OrganizationId)
+		if errP != nil {
+			render.Status(r, 400)
+			render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
+			return
+		}
+		org, err := repo.MainResp.Organization.FindOne(bson.D{{"_id", _id}})
+		if err != nil {
+			render.Status(r, 400)
+			render.JSON(w, r, map[string]string{"message": err.Error()})
+			return
+		}
+
+		resultsOrgs, err := repo.MainResp.Organization.FindAllMyOrgs(claims["id"], 0, 100)
+		var orgsId []string
+		for _, value := range resultsOrgs {
+			orgsId = append(orgsId, value.Id.Hex())
+		}
+
+		if !contains(orgsId, item.OrganizationId) {
+			render.Status(r, 404)
+			render.JSON(w, r, map[string]string{"message": "NOT_FOUND_ORG"})
+			return
+		}
+		item.Organization = models.OrganizationModel{
+			Name: org.Name,
+			Id:   org.Id,
+		}
+	}
 	item.UserId = claims["id"]
 	item.Ip = ReadUserIP(r)
 	item.CreatedAt = time.Now()
