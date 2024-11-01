@@ -13,9 +13,9 @@ type User struct {
 	Id       primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	Email    string             `json:"email" bson:"email" validate:"email,required"`
 	Password string             `json:"password" bson:"password" validate:"required,min=6"`
-	Name     string             `json:"name" bson:"name" required:"required"`
-	Active   bool
-	Setting  string `json:"settings" bson:"settings"`
+	Name     string             `json:"name,omitempty" bson:"name" required:"required"`
+	Active   bool               `json:"active" bson:"active"`
+	Setting  string             `json:"settings,omitempty" bson:"settings"`
 }
 
 type ErrorsHandle struct {

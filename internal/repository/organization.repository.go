@@ -70,6 +70,9 @@ func (r *OrganizationRepository) FindAllMyOrgs(_id interface{}, page int64, limi
 
 func (r *OrganizationRepository) Delete(filter bson.D) (*mongo.DeleteResult, error) {
 	result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionTime).DeleteOne(context.TODO(), filter)
+	if result.DeletedCount <= 0 {
+		err = errors.New("not possible delete org")
+	}
 	return result, err
 }
 

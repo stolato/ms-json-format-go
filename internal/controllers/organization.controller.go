@@ -80,7 +80,7 @@ func (repo *OrganizationController) DeleteOrganization(w http.ResponseWriter, r 
 	result, err := repo.Repo.Organization.Delete(bson.D{{"_id", _id}, {"ownerId", claims["id"]}})
 	if err != nil {
 		render.Status(r, 400)
-		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
+		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
 	render.JSON(w, r, result)

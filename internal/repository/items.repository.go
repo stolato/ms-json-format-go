@@ -3,6 +3,7 @@ package repository
 import (
 	"api-go/internal/models"
 	"context"
+	"errors"
 	"log"
 	"os"
 	"time"
@@ -99,6 +100,9 @@ func (r *ItemsRepository) DeleteItem(_id primitive.ObjectID, user_id interface{}
 		}
 	}
 	result, err := r.delete(bson.D{{"_id", _id}, {"user_id", user_id}})
+	if result.DeletedCount <= 0 {
+		return result, errors.New("not possible delete item")
+	}
 	return result, err
 }
 

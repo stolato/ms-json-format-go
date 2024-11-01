@@ -13,10 +13,10 @@ type Item struct {
 	UpdateAt       time.Time          `json:"updateAt" bson:"updateAt"`
 	Ip             string             `json:"ip" bson:"ip"`
 	UserId         interface{}        `json:"user_id" bson:"user_id"`
-	OrganizationId string             `json:"organization_id" bson:"organizationId"`
+	OrganizationId string             `json:"organization_id,omitempty" bson:"organizationId"`
 	Private        bool               `json:"private" bson:"private"`
-	ExpirateAt     time.Time          `json:"expirateAt" bson:"expirateAt"`
+	ExpirateAt     time.Time          `json:"expirateAt,omitempty" bson:"expirateAt,omitempty"`
 	Name           string             `json:"name" bson:"name"`
 	Views          int32              `json:"views" bson:"views"`
-	Organization   OrganizationModel  `json:"organization" bson:"organization"`
+	Organization   OrganizationModel  `json:"organization,omitempty" bson:"organization"`
 }

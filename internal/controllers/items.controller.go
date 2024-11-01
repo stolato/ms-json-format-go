@@ -97,7 +97,7 @@ func (repo *Repository) AddItem(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	var item models.Item
 	if err := decoder.Decode(&item); err != nil {
-		w.WriteHeader(400)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
@@ -137,7 +137,7 @@ func (repo *Repository) AddItem(w http.ResponseWriter, r *http.Request) {
 	item.UpdateAt = time.Now()
 	saveItem, err := repo.MainResp.Items.AddItem(item)
 	if err != nil {
-		w.WriteHeader(400)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
@@ -148,20 +148,20 @@ func (repo *Repository) UpdateItem(w http.ResponseWriter, r *http.Request) {
 	idstr := chi.URLParam(r, "id")
 	_id, errP := primitive.ObjectIDFromHex(idstr)
 	if errP != nil {
-		w.WriteHeader(403)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
 		return
 	}
 	decoder := json.NewDecoder(r.Body)
 	var item models.Item
 	if err := decoder.Decode(&item); err != nil {
-		w.WriteHeader(400)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
 	saveItem, err := repo.MainResp.Items.UpdateItem(item, _id)
 	if err != nil {
-		w.WriteHeader(400)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
@@ -173,14 +173,14 @@ func (repo *Repository) DeleteItem(w http.ResponseWriter, r *http.Request) {
 	_, claims, _ := jwtauth.FromContext(r.Context())
 	_id, errP := primitive.ObjectIDFromHex(idstr)
 	if errP != nil {
-		w.WriteHeader(400)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
 		return
 	}
 	result, err := repo.MainResp.Items.DeleteItem(_id, claims["id"])
 	if err != nil {
-		w.WriteHeader(400)
-		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
+		render.Status(r, 400)
+		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
 	render.JSON(w, r, result)
