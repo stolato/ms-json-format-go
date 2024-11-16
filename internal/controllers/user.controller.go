@@ -3,14 +3,19 @@ package controllers
 import (
 	"api-go/internal/models"
 	"api-go/internal/repository"
+	"api-go/internal/validation"
+	"api-go/internal/validation/dtos"
 	"encoding/json"
 	"fmt"
+	"go.mongodb.org/mongo-driver/mongo"
+	"net/http"
+	"os"
+
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/go-chi/render"
 	"github.com/golang-jwt/jwt"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"net/http"
-	"os"
 )
 
 type RepositoryUser struct {
@@ -20,21 +25,22 @@ type RepositoryUser struct {
 func (repo *RepositoryUser) RegisterController(w http.ResponseWriter, r *http.Request) {
 	user, err, errs := validateUser(r)
 	if err != nil {
-		w.WriteHeader(400)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
 	if errs != nil {
-		render.JSON(w, r, err)
+		render.Status(r, 400)
+		render.JSON(w, r, errs)
 		return
 	}
-	save, err := repo.User.Register(user)
+	_, err = repo.User.Register(user)
 	if err != nil {
-		w.WriteHeader(400)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
-	render.JSON(w, r, save)
+	render.JSON(w, r, map[string]string{"message": "Success"})
 }
 
 func (repo *RepositoryUser) Me(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +55,7 @@ func (repo *RepositoryUser) UpdateSettings(w http.ResponseWriter, r *http.Reques
 	var settings models.User
 	err := decoder.Decode(&settings)
 	if err != nil {
-		w.WriteHeader(400)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
@@ -68,25 +74,39 @@ func (repo *RepositoryUser) GetSettings(w http.ResponseWriter, r *http.Request) 
 }
 
 func (repo *RepositoryUser) AuthController(w http.ResponseWriter, r *http.Request) {
-	user, err, errs := validateUser(r)
-	if err != nil {
-		w.WriteHeader(401)
+	var userDto dtos.UserLoginDTO
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&userDto); err != nil {
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
-	if errs != nil {
-		render.JSON(w, r, err)
+	if errs := validation.Validator(userDto); errs != nil {
+		render.Status(r, 400)
+		render.JSON(w, r, errs)
 		return
 	}
-	result, err := repo.User.FindOne(user)
+	result, err := repo.User.FindOne(bson.D{
+		{"email", userDto.Email},
+		{"active", true},
+	})
+
+	if err.Error() == mongo.ErrNoDocuments.Error() {
+		render.Status(r, 404)
+		render.JSON(w, r, map[string]string{"message": "user not found or not active"})
+		return
+	}
+
+	err = repository.CheckPasswordHash(userDto.Password, result.Password)
 	if err != nil {
-		w.WriteHeader(401)
-		render.JSON(w, r, map[string]string{"message": err.Error()})
+		render.Status(r, 401)
+		render.JSON(w, r, map[string]string{"message": "password error"})
 		return
 	}
+
 	token, err := result.GenerateJWT()
 	if err != nil {
-		w.WriteHeader(401)
+		render.Status(r, 401)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}

@@ -5,13 +5,15 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
+	"os"
+	"time"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
-	"os"
-	"time"
 )
 
 var collectionUser = "users"
@@ -21,21 +23,20 @@ type UserRepository struct {
 }
 
 func (r *UserRepository) Register(user *models.User) (*mongo.InsertOneResult, error) {
-	password := md5Func(user.Password)
+	password, err := HashPassword(user.Password)
 	user.Password = password
 	user.Active = true
+	check, err := r.FindOne(bson.D{{"email", user.Email}})
+	if check.Email != "" {
+		return nil, errors.New("email ja cadastrado")
+	}
 	result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionUser).InsertOne(context.TODO(), user)
 	return result, err
 }
 
-func (r *UserRepository) FindOne(user *models.User) (models.User, error) {
+func (r *UserRepository) FindOne(filter bson.D) (models.User, error) {
 	result := models.User{}
-	password := md5Func(user.Password)
-	err := r.DB.Database("dbitems").Collection(collectionUser).FindOne(context.TODO(), bson.D{
-		{"email", user.Email},
-		{"password", password},
-		{"active", true},
-	}).Decode(&result)
+	err := r.DB.Database("dbitems").Collection(collectionUser).FindOne(context.TODO(), filter).Decode(&result)
 	return result, err
 }
 
@@ -60,7 +61,7 @@ func (r *UserRepository) FindMe(user *models.User) (models.User, error) {
 	return result, err
 }
 
-func md5Func(pass string) string {
+func Md5Func(pass string) string {
 	hash := md5.New()
 	defer hash.Reset()
 	hash.Write([]byte(pass))

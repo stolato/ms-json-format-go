@@ -1,34 +1,51 @@
 package controllers
 
 import (
+	"api-go/internal/midleware"
 	"api-go/internal/models"
 	"api-go/internal/repository"
+	"api-go/internal/validation"
+	"api-go/internal/validation/dtos"
 	"encoding/json"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/jwtauth/v5"
-	"github.com/go-chi/render"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"log"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/jwtauth/v5"
+	"github.com/go-chi/render"
+	"github.com/prometheus/client_golang/prometheus"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type Repository struct {
-	Items repository.ItemsRepository
+	Duration prometheus.HistogramVec
+	Summary  prometheus.Summary
+	MainResp repository.Respositorys
 }
 
 func (repo *Repository) FindAllItems(w http.ResponseWriter, r *http.Request) {
 	_, claims, _ := jwtauth.FromContext(r.Context())
 	limit := getQuery(r, "limit", 20)
 	page := getQuery(r, "page", 0)
-	findOptions := options.Find()
-	findOptions.SetLimit(limit)
-	findOptions.SetSkip(limit * page)
-	results, err := repo.Items.FindAll(bson.D{{"user_id", claims["id"]}}, findOptions)
+	resultsOrgs, err := repo.MainResp.Organization.FindAllMyOrgs(claims["id"], 0, 100)
+	var orgsId []string
+	for _, value := range resultsOrgs {
+		orgsId = append(orgsId, value.Id.Hex())
+	}
+	if len(orgsId) == 0 {
+		orgsId = append(orgsId, " ")
+	}
+	find := bson.D{{
+		"$or", bson.A{
+			bson.D{{"user_id", claims["id"]}},
+			bson.D{{"organizationId", bson.D{{"$in", orgsId}}}},
+		},
+	}}
+	results, err := repo.MainResp.Items.FindAll(find, page, limit)
 	if err != nil {
 		slog.Error(err.Error())
 	}
@@ -36,25 +53,45 @@ func (repo *Repository) FindAllItems(w http.ResponseWriter, r *http.Request) {
 }
 
 func (repo *Repository) FindOneItem(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	status := "200"
 	_, claims, _ := jwtauth.FromContext(r.Context())
-	idstr := chi.URLParam(r, "id")
-	_id, errP := primitive.ObjectIDFromHex(idstr)
+	idStr := chi.URLParam(r, "id")
+	_id, errP := primitive.ObjectIDFromHex(idStr)
 	if errP != nil {
-		w.WriteHeader(403)
+		render.Status(r, 403)
+		status = "403"
 		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
 		return
 	}
-	result, err := repo.Items.FindOne(_id)
+	result, err := repo.MainResp.Items.FindOne(_id, true)
 	if err != nil {
-		w.WriteHeader(404)
+		render.Status(r, 404)
+		status = "404"
 		render.JSON(w, r, map[string]string{"message": "NOT_FOUND"})
 		return
 	}
+	resultsOrgs, err := repo.MainResp.Organization.FindAllMyOrgs(claims["id"], 0, 100)
+	var orgsId []string
+	for _, value := range resultsOrgs {
+		orgsId = append(orgsId, value.Id.Hex())
+	}
+
+	if result.OrganizationId != "" && !contains(orgsId, result.OrganizationId) {
+		render.Status(r, 404)
+		status = "404"
+		render.JSON(w, r, map[string]string{"message": "NOT_FOUND_ORG"})
+		return
+	}
+
 	if result.Private && claims["id"] != result.UserId {
-		w.WriteHeader(404)
-		render.JSON(w, r, map[string]string{"message": "NOT_FOUND"})
+		render.Status(r, 404)
+		status = "404"
+		render.JSON(w, r, map[string]string{"message": "NOT_FOUND_ORG"})
 		return
 	}
+	defer repo.Duration.WithLabelValues(midleware.GetRoutePattern(r), r.Method, status).Observe(time.Since(start).Seconds())
+	defer repo.Summary.Observe(time.Since(start).Seconds())
 	render.JSON(w, r, result)
 }
 
@@ -62,18 +99,58 @@ func (repo *Repository) AddItem(w http.ResponseWriter, r *http.Request) {
 	_, claims, _ := jwtauth.FromContext(r.Context())
 	decoder := json.NewDecoder(r.Body)
 	var item models.Item
-	if err := decoder.Decode(&item); err != nil {
-		w.WriteHeader(400)
+	var dto dtos.ItemStoreDTO
+	if err := decoder.Decode(&dto); err != nil {
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
+	if errs := validation.Validator(dto); errs != nil {
+		render.Status(r, 400)
+		render.JSON(w, r, errs)
+		return
+	}
+	if item.OrganizationId != "" {
+		_id, errP := primitive.ObjectIDFromHex(item.OrganizationId)
+		if errP != nil {
+			render.Status(r, 400)
+			render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
+			return
+		}
+		org, err := repo.MainResp.Organization.FindOne(bson.D{{"_id", _id}})
+		if err != nil {
+			render.Status(r, 400)
+			render.JSON(w, r, map[string]string{"message": err.Error()})
+			return
+		}
+
+		resultsOrgs, err := repo.MainResp.Organization.FindAllMyOrgs(claims["id"], 0, 100)
+		var orgsId []string
+		for _, value := range resultsOrgs {
+			orgsId = append(orgsId, value.Id.Hex())
+		}
+
+		if !contains(orgsId, item.OrganizationId) {
+			render.Status(r, 404)
+			render.JSON(w, r, map[string]string{"message": "NOT_FOUND_ORG"})
+			return
+		}
+		item.Organization = &models.OrganizationModel{
+			Name: org.Name,
+			Id:   org.Id,
+		}
+	}
 	item.UserId = claims["id"]
+	item.Json = dto.Json
+	item.Name = dto.Name
+	item.OrganizationId = dto.OrganizationID
 	item.Ip = ReadUserIP(r)
 	item.CreatedAt = time.Now()
 	item.UpdateAt = time.Now()
-	saveItem, err := repo.Items.AddItem(item)
+	item.ExpirateAt = time.Now().AddDate(0, 0, 7)
+	saveItem, err := repo.MainResp.Items.AddItem(item)
 	if err != nil {
-		w.WriteHeader(400)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
@@ -81,23 +158,23 @@ func (repo *Repository) AddItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (repo *Repository) UpdateItem(w http.ResponseWriter, r *http.Request) {
-	idstr := chi.URLParam(r, "id")
-	_id, errP := primitive.ObjectIDFromHex(idstr)
+	idStr := chi.URLParam(r, "id")
+	_id, errP := primitive.ObjectIDFromHex(idStr)
 	if errP != nil {
-		w.WriteHeader(403)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
 		return
 	}
 	decoder := json.NewDecoder(r.Body)
 	var item models.Item
 	if err := decoder.Decode(&item); err != nil {
-		w.WriteHeader(400)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
-	saveItem, err := repo.Items.UpdateItem(item, _id)
+	saveItem, err := repo.MainResp.Items.UpdateItem(item, _id)
 	if err != nil {
-		w.WriteHeader(400)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
@@ -105,19 +182,18 @@ func (repo *Repository) UpdateItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (repo *Repository) DeleteItem(w http.ResponseWriter, r *http.Request) {
-	idstr := chi.URLParam(r, "id")
+	idStr := chi.URLParam(r, "id")
 	_, claims, _ := jwtauth.FromContext(r.Context())
-	_id, errP := primitive.ObjectIDFromHex(idstr)
+	_id, errP := primitive.ObjectIDFromHex(idStr)
 	if errP != nil {
-		w.WriteHeader(400)
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
 		return
 	}
-
-	result, err := repo.Items.DeleteItem(_id, claims["id"])
+	result, err := repo.MainResp.Items.DeleteItem(_id, claims["id"])
 	if err != nil {
-		w.WriteHeader(400)
-		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
+		render.Status(r, 400)
+		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
 	render.JSON(w, r, result)
@@ -144,4 +220,13 @@ func ReadUserIP(r *http.Request) string {
 		IPAddress = r.RemoteAddr
 	}
 	return IPAddress
+}
+
+func contains(s []string, e string) bool {
+	for _, a := range s {
+		if a == e {
+			return true
+		}
+	}
+	return false
 }
