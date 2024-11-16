@@ -49,14 +49,16 @@ func (r *ItemsRepository) FindAll(filter bson.D, page int64, limit int64) (Resul
 	return ResultItems{Data: results, Page: page, Limit: limit, TotalItems: int(count)}, err
 }
 
-func (r *ItemsRepository) FindOne(_id primitive.ObjectID) (models.Item, error) {
+func (r *ItemsRepository) FindOne(_id primitive.ObjectID, update bool) (models.Item, error) {
 	result := models.Item{}
 	err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).FindOne(context.TODO(), bson.D{{"_id", _id}}).Decode(&result)
-	r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).FindOneAndUpdate(context.TODO(), bson.D{{"_id", result.Id}}, bson.D{{"$set", bson.D{
-		{"views", result.Views + 1},
-		{"expirateAt", time.Now().AddDate(0, 0, 7)},
-		{"updateAt", time.Now()},
-	}}})
+	if update {
+		r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).FindOneAndUpdate(context.TODO(), bson.D{{"_id", result.Id}}, bson.D{{"$set", bson.D{
+			{"views", result.Views + 1},
+			{"expirateAt", time.Now().AddDate(0, 0, 7)},
+			{"updateAt", time.Now()},
+		}}})
+	}
 	return result, err
 }
 
@@ -84,7 +86,7 @@ func (r *ItemsRepository) UpdateItem(item models.Item, _id primitive.ObjectID) (
 }
 
 func (r *ItemsRepository) DeleteItem(_id primitive.ObjectID, user_id interface{}) (*mongo.DeleteResult, error) {
-	item, err := r.FindOne(_id)
+	item, err := r.FindOne(_id, false)
 	if item.OrganizationId != "" {
 		org := models.OrganizationModel{}
 		err = r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionTime).FindOne(context.TODO(), bson.D{
@@ -99,7 +101,11 @@ func (r *ItemsRepository) DeleteItem(_id primitive.ObjectID, user_id interface{}
 			return result, err
 		}
 	}
-	result, err := r.delete(bson.D{{"_id", _id}, {"user_id", user_id}})
+	find := bson.D{{"_id", _id}, {"user_id", user_id}}
+	if user_id == nil {
+		find = bson.D{{"_id", _id}}
+	}
+	result, err := r.delete(find)
 	if result.DeletedCount <= 0 {
 		return result, errors.New("not possible delete item")
 	}

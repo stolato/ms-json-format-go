@@ -53,7 +53,7 @@ func (repo *OrganizationController) AddTime(w http.ResponseWriter, r *http.Reque
 	id := fmt.Sprintf("%s", claims["id"])
 	_id, _ := primitive.ObjectIDFromHex(id)
 	userOwner = append(userOwner, models.User{Id: _id})
-	itemSave.Users = userOwner
+	itemSave.Users = &userOwner
 	itemSave.Name = dto.Name
 	itemSave.OwnerId = id
 	itemSave.CreatedAt = time.Now()

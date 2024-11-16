@@ -11,11 +11,11 @@ import (
 
 type User struct {
 	Id       primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	Email    string             `json:"email" bson:"email" validate:"email,required"`
-	Password string             `json:"password" bson:"password" validate:"required,min=6"`
-	Name     string             `json:"name,omitempty" bson:"name" required:"required"`
-	Active   bool               `json:"active" bson:"active"`
-	Setting  string             `json:"settings,omitempty" bson:"settings"`
+	Email    string             `json:"email,omitempty" bson:"email,omitempty" validate:"email,required"`
+	Password string             `json:"password,omitempty" bson:"password,omitempty" validate:"required,min=6"`
+	Name     string             `json:"name,omitempty" bson:"name,omitempty" validate:"required"`
+	Active   bool               `json:"active,omitempty" bson:"active,omitempty"`
+	Setting  string             `json:"settings,omitempty" bson:"settings,omitempty"`
 }
 
 type ErrorsHandle struct {

@@ -23,10 +23,10 @@ type UserRepository struct {
 }
 
 func (r *UserRepository) Register(user *models.User) (*mongo.InsertOneResult, error) {
-	password := Md5Func(user.Password)
+	password, err := HashPassword(user.Password)
 	user.Password = password
 	user.Active = true
-	check, err := r.FindOne(user, bson.D{{"email", user.Email}})
+	check, err := r.FindOne(bson.D{{"email", user.Email}})
 	if check.Email != "" {
 		return nil, errors.New("email ja cadastrado")
 	}
@@ -34,7 +34,7 @@ func (r *UserRepository) Register(user *models.User) (*mongo.InsertOneResult, er
 	return result, err
 }
 
-func (r *UserRepository) FindOne(user *models.User, filter bson.D) (models.User, error) {
+func (r *UserRepository) FindOne(filter bson.D) (models.User, error) {
 	result := models.User{}
 	err := r.DB.Database("dbitems").Collection(collectionUser).FindOne(context.TODO(), filter).Decode(&result)
 	return result, err

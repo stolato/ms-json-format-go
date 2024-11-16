@@ -4,6 +4,8 @@ import (
 	"api-go/internal/midleware"
 	"api-go/internal/models"
 	"api-go/internal/repository"
+	"api-go/internal/validation"
+	"api-go/internal/validation/dtos"
 	"encoding/json"
 	"log"
 	"log/slog"
@@ -35,14 +37,15 @@ func (repo *Repository) FindAllItems(w http.ResponseWriter, r *http.Request) {
 		orgsId = append(orgsId, value.Id.Hex())
 	}
 	if len(orgsId) == 0 {
-		orgsId = append(orgsId, "")
+		orgsId = append(orgsId, " ")
 	}
-	results, err := repo.MainResp.Items.FindAll(bson.D{{
+	find := bson.D{{
 		"$or", bson.A{
 			bson.D{{"user_id", claims["id"]}},
 			bson.D{{"organizationId", bson.D{{"$in", orgsId}}}},
 		},
-	}}, page, limit)
+	}}
+	results, err := repo.MainResp.Items.FindAll(find, page, limit)
 	if err != nil {
 		slog.Error(err.Error())
 	}
@@ -53,15 +56,15 @@ func (repo *Repository) FindOneItem(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	status := "200"
 	_, claims, _ := jwtauth.FromContext(r.Context())
-	idstr := chi.URLParam(r, "id")
-	_id, errP := primitive.ObjectIDFromHex(idstr)
+	idStr := chi.URLParam(r, "id")
+	_id, errP := primitive.ObjectIDFromHex(idStr)
 	if errP != nil {
 		render.Status(r, 403)
 		status = "403"
 		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
 		return
 	}
-	result, err := repo.MainResp.Items.FindOne(_id)
+	result, err := repo.MainResp.Items.FindOne(_id, true)
 	if err != nil {
 		render.Status(r, 404)
 		status = "404"
@@ -96,9 +99,15 @@ func (repo *Repository) AddItem(w http.ResponseWriter, r *http.Request) {
 	_, claims, _ := jwtauth.FromContext(r.Context())
 	decoder := json.NewDecoder(r.Body)
 	var item models.Item
-	if err := decoder.Decode(&item); err != nil {
+	var dto dtos.ItemStoreDTO
+	if err := decoder.Decode(&dto); err != nil {
 		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
+		return
+	}
+	if errs := validation.Validator(dto); errs != nil {
+		render.Status(r, 400)
+		render.JSON(w, r, errs)
 		return
 	}
 	if item.OrganizationId != "" {
@@ -126,15 +135,19 @@ func (repo *Repository) AddItem(w http.ResponseWriter, r *http.Request) {
 			render.JSON(w, r, map[string]string{"message": "NOT_FOUND_ORG"})
 			return
 		}
-		item.Organization = models.OrganizationModel{
+		item.Organization = &models.OrganizationModel{
 			Name: org.Name,
 			Id:   org.Id,
 		}
 	}
 	item.UserId = claims["id"]
+	item.Json = dto.Json
+	item.Name = dto.Name
+	item.OrganizationId = dto.OrganizationID
 	item.Ip = ReadUserIP(r)
 	item.CreatedAt = time.Now()
 	item.UpdateAt = time.Now()
+	item.ExpirateAt = time.Now().AddDate(0, 0, 7)
 	saveItem, err := repo.MainResp.Items.AddItem(item)
 	if err != nil {
 		render.Status(r, 400)
@@ -145,8 +158,8 @@ func (repo *Repository) AddItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (repo *Repository) UpdateItem(w http.ResponseWriter, r *http.Request) {
-	idstr := chi.URLParam(r, "id")
-	_id, errP := primitive.ObjectIDFromHex(idstr)
+	idStr := chi.URLParam(r, "id")
+	_id, errP := primitive.ObjectIDFromHex(idStr)
 	if errP != nil {
 		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})
@@ -169,9 +182,9 @@ func (repo *Repository) UpdateItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (repo *Repository) DeleteItem(w http.ResponseWriter, r *http.Request) {
-	idstr := chi.URLParam(r, "id")
+	idStr := chi.URLParam(r, "id")
 	_, claims, _ := jwtauth.FromContext(r.Context())
-	_id, errP := primitive.ObjectIDFromHex(idstr)
+	_id, errP := primitive.ObjectIDFromHex(idStr)
 	if errP != nil {
 		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": "Not object to mongoID"})

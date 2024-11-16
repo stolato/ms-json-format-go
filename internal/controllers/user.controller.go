@@ -3,8 +3,11 @@ package controllers
 import (
 	"api-go/internal/models"
 	"api-go/internal/repository"
+	"api-go/internal/validation"
+	"api-go/internal/validation/dtos"
 	"encoding/json"
 	"fmt"
+	"go.mongodb.org/mongo-driver/mongo"
 	"net/http"
 	"os"
 
@@ -71,27 +74,36 @@ func (repo *RepositoryUser) GetSettings(w http.ResponseWriter, r *http.Request) 
 }
 
 func (repo *RepositoryUser) AuthController(w http.ResponseWriter, r *http.Request) {
-	user, err, errs := validateUser(r)
-	if err != nil {
-		render.Status(r, 401)
+	var userDto dtos.UserLoginDTO
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&userDto); err != nil {
+		render.Status(r, 400)
 		render.JSON(w, r, map[string]string{"message": err.Error()})
 		return
 	}
-	if errs != nil {
-		render.JSON(w, r, err)
+	if errs := validation.Validator(userDto); errs != nil {
+		render.Status(r, 400)
+		render.JSON(w, r, errs)
 		return
 	}
-	password := repository.Md5Func(user.Password)
-	result, err := repo.User.FindOne(user, bson.D{
-		{"email", user.Email},
-		{"password", password},
+	result, err := repo.User.FindOne(bson.D{
+		{"email", userDto.Email},
 		{"active", true},
 	})
-	if err != nil {
-		render.Status(r, 401)
-		render.JSON(w, r, map[string]string{"message": err.Error()})
+
+	if err.Error() == mongo.ErrNoDocuments.Error() {
+		render.Status(r, 404)
+		render.JSON(w, r, map[string]string{"message": "user not found or not active"})
 		return
 	}
+
+	err = repository.CheckPasswordHash(userDto.Password, result.Password)
+	if err != nil {
+		render.Status(r, 401)
+		render.JSON(w, r, map[string]string{"message": "password error"})
+		return
+	}
+
 	token, err := result.GenerateJWT()
 	if err != nil {
 		render.Status(r, 401)

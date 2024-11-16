@@ -51,6 +51,7 @@ func (router *RouterAPI) InitRouter() {
 	}
 	userHandle := controllers.RepositoryUser{User: *mainRepository.Repositorys().User}
 	organizationHandle := controllers.OrganizationController{Repo: mainRepository.Repositorys()}
+	checkUserMiddleware := midleware.CheckUserMidleware{Repository: *mainRepository.Repositorys().User}
 
 	//r.Get("/items", itemsHandle.FindAllItems)
 	r.Use(jwtauth.Verifier(tokenAuth))
@@ -64,6 +65,7 @@ func (router *RouterAPI) InitRouter() {
 
 	r.Group(func(r chi.Router) {
 		r.Use(jwtauth.Authenticator(tokenAuth))
+		r.Use(checkUserMiddleware.CheckUser)
 		r.Get("/items", itemsHandle.FindAllItems)
 		r.Delete("/items/{id}", itemsHandle.DeleteItem)
 		r.Get("/user/me", userHandle.Me)
