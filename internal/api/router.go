@@ -82,9 +82,13 @@ func (router *RouterAPI) InitRouter() {
 
 	port := os.Getenv("PORT")
 
+	if port == "" {
+		port = "80"
+	}
+
 	slog.Info("Server started on port " + port)
 	err := http.ListenAndServe(":"+port, r)
 	if err != nil {
-		log.Fatalln(err.Error())
+		log.Println(err.Error())
 	}
 }

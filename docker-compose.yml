@@ -3,13 +3,13 @@ services:
   web:
     build: .
     ports:
-      - 8000:8000
+      - "8000:8000"
     networks:
       - live_prometheus
   prometheus:
     image: prom/prometheus:latest
     ports:
-      - 9090:9090
+      - "9090:9090"
     networks:
       - live_prometheus
     volumes:
@@ -17,15 +17,15 @@ services:
   grafana:
     image: grafana/grafana:10.2.2
     ports:
-      - 3000:3000
+      - "3000:3000"
     networks:
       - live_prometheus
-  mongodb:
-    image: mongo:latest
-    ports:
-      - 27017:27017
-    networks:
-      - live_prometheus
+#  mongodb:
+#    image: mongo:latest
+#    ports:
+#      - 27017:27017
+#    networks:
+#      - live_prometheus
 networks:
   live_prometheus:
     driver: bridge

@@ -26,6 +26,7 @@ func (r *UserRepository) Register(user *models.User) (*mongo.InsertOneResult, er
 	password, err := HashPassword(user.Password)
 	user.Password = password
 	user.Active = true
+	user.Setting = "{\"dark_mode\":true,\"preview\":true}"
 	check, err := r.FindOne(bson.D{{"email", user.Email}})
 	if check.Email != "" {
 		return nil, errors.New("email ja cadastrado")
@@ -37,7 +38,10 @@ func (r *UserRepository) Register(user *models.User) (*mongo.InsertOneResult, er
 func (r *UserRepository) FindOne(filter bson.D) (models.User, error) {
 	result := models.User{}
 	err := r.DB.Database("dbitems").Collection(collectionUser).FindOne(context.TODO(), filter).Decode(&result)
-	return result, err
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func (r *UserRepository) UpdateSettings(userId string, settings string) {

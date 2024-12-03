@@ -7,14 +7,13 @@ import (
 	"api-go/internal/validation/dtos"
 	"encoding/json"
 	"fmt"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/bson"
 	"net/http"
 	"os"
 
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/go-chi/render"
 	"github.com/golang-jwt/jwt"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -91,7 +90,8 @@ func (repo *RepositoryUser) AuthController(w http.ResponseWriter, r *http.Reques
 		{"active", true},
 	})
 
-	if err.Error() == mongo.ErrNoDocuments.Error() {
+	if err != nil {
+		fmt.Println(err.Error())
 		render.Status(r, 404)
 		render.JSON(w, r, map[string]string{"message": "user not found or not active"})
 		return
@@ -111,6 +111,7 @@ func (repo *RepositoryUser) AuthController(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	render.JSON(w, r, token)
+	return
 }
 
 func (repo *RepositoryUser) RefreshToken(w http.ResponseWriter, r *http.Request) {

@@ -1,4 +1,6 @@
-FROM golang:1.21
+# FROM golang:1.23 AS build-stage
+
+FROM golang:1.23
 
 # Set destination for COPY
 WORKDIR /app
@@ -9,8 +11,17 @@ ENV GOPROXY=https://goproxy.cn
 
 RUN go mod download
 
-RUN go build -o main cmd/main.go
+RUN env GOOS=linux GOARCH=arm go build -o main cmd/main.go
 
-EXPOSE 8000
+# # # Deploy the application binary into a lean image
+# FROM gcr.io/distroless/base-debian11 AS build-release-stage
+
+# WORKDIR /
+
+# COPY --from=build-stage /app/main /main
+
+# USER nonroot:nonroot
+
+EXPOSE 80
 
 CMD ["./main"]
