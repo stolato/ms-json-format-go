@@ -5,6 +5,7 @@
       <methods>
         <method importPath="api-go/internal/repository" receiver="*UserRepository" name="FindOne" />
         <method importPath="api-go/internal/repository" receiver="*ItemsRepository" name="delete" />
+        <method importPath="go.mongodb.org/mongo-driver/mongo" receiver="*Collection" name="Find" />
       </methods>
     </inspection_tool>
   </profile>

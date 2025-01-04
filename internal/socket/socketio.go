@@ -1,52 +1,69 @@
 package socket
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/zishang520/socket.io/v2/socket"
 	"log"
 	"net/http"
-
-	socketio "github.com/googollee/go-socket.io"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
+type notification struct {
+	Data  string      `json:"data"`
+	Room  socket.Room `json:"room"`
+	Event string      `json:"event"`
+}
+
 func SocketI() {
-	server := socketio.NewServer(nil)
+	io := socket.NewServer(nil, nil)
+	http.Handle("/socket.io/", io.ServeHandler(nil))
+	go func() {
+		err := http.ListenAndServe(":8001", nil)
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+	}()
 
-	server.OnConnect("/", func(s socketio.Conn) error {
-		s.SetContext("")
-		fmt.Println("connected:", s.ID())
-		return nil
+	io.Of("/items", nil).On("connection", func(clients ...any) {
+		client := clients[0].(*socket.Socket)
+		client.On("events", func(datas ...any) {
+			var events notification
+			str := fmt.Sprintf("%v", datas[0])
+			data := []byte(str)
+			err := json.Unmarshal(data, &events)
+			if err != nil {
+				log.Println(err.Error())
+			}
+			client.Broadcast().To(events.Room).Emit(events.Event, events.Data)
+		})
+		client.On("disconnect", func(data ...any) {
+			log.Println("closed", data)
+		})
+
+		client.On("join", func(data ...any) {
+			channel := socket.Room(fmt.Sprintf("%v", data[0]))
+			client.Join(channel)
+		})
 	})
 
-	server.OnEvent("/items", "join", func(s socketio.Conn, msg string) {
-		s.Join(msg)
-	})
+	exit := make(chan struct{})
+	SignalC := make(chan os.Signal)
 
-	server.OnEvent("/items", "events", func(s socketio.Conn, msg string) {
-		server.BroadcastToRoom("/items", "123", "new-json", msg)
-	})
+	signal.Notify(SignalC, os.Interrupt, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	go func() {
+		for s := range SignalC {
+			switch s {
+			case os.Interrupt, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT:
+				close(exit)
+				return
+			}
+		}
+	}()
 
-	server.OnEvent("/items", "bye", func(s socketio.Conn, msg string) string {
-		last := s.Context().(string)
-		s.Leave(msg)
-		s.Emit("bye", last)
-		s.Close()
-		return last
-	})
-
-	server.OnError("/item", func(s socketio.Conn, e error) {
-		// server.Remove(s.ID())
-		fmt.Println("meet error:", e)
-	})
-
-	server.OnDisconnect("/", func(s socketio.Conn, reason string) {
-		// Add the Remove session id. Fixed the connection & mem leak
-		fmt.Println("closed", reason)
-	})
-
-	go server.Serve()
-	defer server.Close()
-
-	http.Handle("/socket.io/", server)
-	log.Println("Serving at localhost:8001...")
-	log.Fatal(http.ListenAndServe(":8001", nil))
+	<-exit
+	io.Close(nil)
+	os.Exit(0)
 }

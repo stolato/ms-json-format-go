@@ -39,11 +39,11 @@ func (r *ItemsRepository) FindAll(filter bson.D, page int64, limit int64) (Resul
 	findOptions.SetSkip(limit * page)
 	cursor, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).Find(context.TODO(), filter, findOptions)
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err.Error())
 	}
 	var results []models.Item
 	if err = cursor.All(context.TODO(), &results); err != nil {
-		log.Fatal(err)
+		log.Println(err.Error())
 	}
 	count, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).CountDocuments(context.TODO(), filter)
 	return ResultItems{Data: results, Page: page, Limit: limit, TotalItems: int(count)}, err
