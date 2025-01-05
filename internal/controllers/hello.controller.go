@@ -15,7 +15,7 @@ type MetricsHello struct {
 
 func (m *MetricsHello) HelloWord(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	render.JSON(w, r, map[string]string{"name": "MS Items", "version": "1.0.5-beta-ecs"})
+	render.JSON(w, r, map[string]string{"name": "MS Items", "version": "1.0.6"})
 	m.Duration.WithLabelValues("/", "GET", "200").Observe(time.Since(start).Seconds())
 	m.Summary.Observe(time.Since(start).Seconds())
 	return
