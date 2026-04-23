@@ -1,16 +1,19 @@
-package config
+package database
 
 import (
 	"context"
 	"fmt"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"log"
 	"os"
 	"time"
+
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-func DB() (*mongo.Client, error) {
+var DB *mongo.Client
+
+func Connect() {
 	uri := os.Getenv("MONGODB_URI")
 	if uri == "" {
 		log.Fatal("You must set your 'MONGODB_URI' environment variable. See\n\t https://www.mongodb.com/docs/drivers/go/current/usage-examples/#environment-variable")
@@ -25,5 +28,5 @@ func DB() (*mongo.Client, error) {
 		fmt.Println(err)
 		panic(err)
 	}
-	return client, err
+	DB = client
 }

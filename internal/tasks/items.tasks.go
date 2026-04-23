@@ -1,27 +1,25 @@
 package tasks
 
 import (
-	"api-go/internal/repository"
+	"api-go/internal/database"
+	"api-go/internal/repositories"
 	"fmt"
-	"github.com/robfig/cron"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
 	"log"
 	"time"
+
+	"github.com/robfig/cron"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
-type ItemTask struct {
-	DB *mongo.Client
-}
-
-func (r *ItemTask) HandleTask() {
-	repo := repository.RepositoryMain{DB: r.DB}
+func HandleTask() {
+	log.Println("Iniciando tarefas")
+	repo := repositories.NewItemsRepository(database.DB)
 	c := cron.New()
 	c.Start()
 
 	err := c.AddFunc("0 0 1 * * *", func() {
 		fmt.Println("Minha tarefa foi executada às", time.Now())
-		results, err := repo.Repositorys().Items.FindAll(bson.D{
+		results, err := repo.FindAll(bson.D{
 			{"user_id", bson.D{
 				{"$in", bson.A{nil}},
 			}},
@@ -33,7 +31,7 @@ func (r *ItemTask) HandleTask() {
 			log.Println(err.Error())
 		}
 		for _, data := range results.Data {
-			_, err := repo.Repositorys().Items.DeleteItem(data.Id, nil)
+			_, err := repo.DeleteItem(data.Id, "")
 			if err != nil {
 				log.Println(err.Error())
 			}

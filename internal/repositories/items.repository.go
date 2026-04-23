@@ -1,4 +1,4 @@
-package repository
+package repositories
 
 import (
 	"api-go/internal/models"
@@ -16,7 +16,15 @@ import (
 
 var collection = "items"
 
-type ItemsRepository struct {
+type ItemsRepository interface {
+	FindAll(filter bson.D, page int64, limit int64) (ResultItems, error)
+	AddItem(item models.Item) (*mongo.InsertOneResult, error)
+	UpdateItem(item models.Item, _id primitive.ObjectID) (models.Item, error)
+	DeleteItem(_id primitive.ObjectID, user_id string) (*mongo.DeleteResult, error)
+	FindOne(_id primitive.ObjectID, update bool) (models.Item, error)
+}
+
+type itemsRepository struct {
 	DB *mongo.Client
 }
 
@@ -27,13 +35,13 @@ type ResultItems struct {
 	Data       []models.Item `json:"data"`
 }
 
-func NewItemsRepository(db *mongo.Client) *ItemsRepository {
-	return &ItemsRepository{
+func NewItemsRepository(db *mongo.Client) ItemsRepository {
+	return &itemsRepository{
 		DB: db,
 	}
 }
 
-func (r *ItemsRepository) FindAll(filter bson.D, page int64, limit int64) (ResultItems, error) {
+func (r *itemsRepository) FindAll(filter bson.D, page int64, limit int64) (ResultItems, error) {
 	findOptions := options.Find()
 	findOptions.SetLimit(limit)
 	findOptions.SetSkip(limit * page)
@@ -49,7 +57,7 @@ func (r *ItemsRepository) FindAll(filter bson.D, page int64, limit int64) (Resul
 	return ResultItems{Data: results, Page: page, Limit: limit, TotalItems: int(count)}, err
 }
 
-func (r *ItemsRepository) FindOne(_id primitive.ObjectID, update bool) (models.Item, error) {
+func (r *itemsRepository) FindOne(_id primitive.ObjectID, update bool) (models.Item, error) {
 	result := models.Item{}
 	err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).FindOne(context.TODO(), bson.D{{"_id", _id}}).Decode(&result)
 	if update {
@@ -62,12 +70,12 @@ func (r *ItemsRepository) FindOne(_id primitive.ObjectID, update bool) (models.I
 	return result, err
 }
 
-func (r *ItemsRepository) AddItem(item models.Item) (*mongo.InsertOneResult, error) {
+func (r *itemsRepository) AddItem(item models.Item) (*mongo.InsertOneResult, error) {
 	result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).InsertOne(context.TODO(), item)
 	return result, err
 }
 
-func (r *ItemsRepository) UpdateItem(item models.Item, _id primitive.ObjectID) (models.Item, error) {
+func (r *itemsRepository) UpdateItem(item models.Item, _id primitive.ObjectID) (models.Item, error) {
 	update := bson.D{{"$set", bson.D{
 		{"json", item.Json},
 		{"expirateAt", time.Now().AddDate(0, 0, 7)},
@@ -85,7 +93,7 @@ func (r *ItemsRepository) UpdateItem(item models.Item, _id primitive.ObjectID) (
 	return doc, err
 }
 
-func (r *ItemsRepository) DeleteItem(_id primitive.ObjectID, user_id interface{}) (*mongo.DeleteResult, error) {
+func (r *itemsRepository) DeleteItem(_id primitive.ObjectID, user_id string) (*mongo.DeleteResult, error) {
 	item, err := r.FindOne(_id, false)
 	if item.OrganizationId != "" {
 		org := models.OrganizationModel{}
@@ -102,7 +110,7 @@ func (r *ItemsRepository) DeleteItem(_id primitive.ObjectID, user_id interface{}
 		}
 	}
 	find := bson.D{{"_id", _id}, {"user_id", user_id}}
-	if user_id == nil {
+	if user_id == "" {
 		find = bson.D{{"_id", _id}}
 	}
 	result, err := r.delete(find)
@@ -112,7 +120,7 @@ func (r *ItemsRepository) DeleteItem(_id primitive.ObjectID, user_id interface{}
 	return result, err
 }
 
-func (r *ItemsRepository) delete(filter bson.D) (*mongo.DeleteResult, error) {
+func (r *itemsRepository) delete(filter bson.D) (*mongo.DeleteResult, error) {
 	result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).DeleteOne(context.TODO(), filter)
 	return result, err
 }

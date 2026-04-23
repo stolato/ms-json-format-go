@@ -12,7 +12,7 @@ type Item struct {
 	CreatedAt      time.Time          `json:"createdAt" bson:"createdAt"`
 	UpdateAt       time.Time          `json:"updateAt" bson:"updateAt"`
 	Ip             string             `json:"ip" bson:"ip"`
-	UserId         interface{}        `json:"user_id" bson:"user_id"`
+	UserId         string             `json:"user_id" bson:"user_id"`
 	OrganizationId string             `json:"organization_id,omitempty" bson:"organizationId"`
 	Private        bool               `json:"private" bson:"private"`
 	ExpirateAt     time.Time          `json:"expirateAt,omitempty" bson:"expirateAt,omitempty"`

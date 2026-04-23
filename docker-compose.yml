@@ -4,28 +4,53 @@ services:
     build: .
     ports:
       - "8000:8000"
+      - "9091:9091"
+    env_file:
+      - .env
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=tempo:4318
+    depends_on:
+      - tempo
     networks:
       - live_prometheus
+
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/tmp/tempo.yml"]
+    ports:
+      - "3200:3200"  # HTTP API
+      - "4317:4317"  # OTLP gRPC
+      - "4318:4318"  # OTLP HTTP
+    volumes:
+      - "./tempo.yml:/tmp/tempo.yml:z"
+    networks:
+      - live_prometheus
+
   prometheus:
     image: prom/prometheus:latest
+    user: root
     ports:
       - "9090:9090"
+    volumes:
+      - "./prometheus.yml:/etc/prometheus/prometheus.yml:z"
     networks:
       - live_prometheus
-    volumes:
-      - "./prometheus.yml:/etc/prometheus/prometheus.yaml"
+
   grafana:
     image: grafana/grafana:10.2.2
     ports:
       - "3000:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - "./grafana/provisioning:/etc/grafana/provisioning:z"
+    depends_on:
+      - prometheus
+      - tempo
     networks:
       - live_prometheus
-#  mongodb:
-#    image: mongo:latest
-#    ports:
-#      - 27017:27017
-#    networks:
-#      - live_prometheus
+
 networks:
   live_prometheus:
     driver: bridge

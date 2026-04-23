@@ -1,27 +1,24 @@
-# FROM golang:1.23 AS build-stage
+FROM golang:1.25-alpine AS build
 
-FROM golang:1.23
-
-# Set destination for COPY
 WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download
 
 COPY . .
 
-ENV GOPROXY=https://goproxy.cn
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o main cmd/main.go
 
-RUN go mod download
+FROM scratch
 
-RUN env GOOS=linux GOARCH=arm go build -o main cmd/main.go
+WORKDIR /
 
-# # # Deploy the application binary into a lean image
-# FROM gcr.io/distroless/base-debian11 AS build-release-stage
+COPY --from=build /app/main /main
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
-# WORKDIR /
+EXPOSE 8000
+EXPOSE 9091
 
-# COPY --from=build-stage /app/main /main
+USER 1001
 
-# USER nonroot:nonroot
-
-EXPOSE 80
-
-CMD ["./main"]
+CMD ["/main"]
