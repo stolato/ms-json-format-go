@@ -1,11 +1,7 @@
 package models
 
 import (
-	"os"
-	"time"
-
 	"github.com/go-playground/validator/v10"
-	"github.com/golang-jwt/jwt/v5"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -16,6 +12,14 @@ type User struct {
 	Name     string             `json:"name,omitempty" bson:"name,omitempty" validate:"required"`
 	Active   bool               `json:"active,omitempty" bson:"active,omitempty"`
 	Setting  string             `json:"settings,omitempty" bson:"settings,omitempty"`
+	// EmailVerified: nil = conta anterior à verificação de email (tratada como
+	// verificada); false = aguardando confirmação.
+	EmailVerified *bool `json:"-" bson:"emailVerified,omitempty"`
+}
+
+// IsEmailVerified considera contas antigas (sem o campo) como verificadas.
+func (u *User) IsEmailVerified() bool {
+	return u.EmailVerified == nil || *u.EmailVerified
 }
 
 type ErrorsHandle struct {
@@ -42,32 +46,4 @@ func (u *User) Validate() []ErrorsHandle {
 		}
 	}
 	return validationErrors
-}
-
-func (u *User) GenerateJWT() (map[string]string, error) {
-	secret := os.Getenv("JWT_SECRET")
-	claims := jwt.MapClaims{
-		"id":    u.Id,
-		"email": u.Email,
-		"name":  u.Name,
-		"exp":   time.Now().Add(time.Hour * 24).Unix(),
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-	tokenString, err := token.SignedString([]byte(secret))
-
-	refreshClaims := jwt.MapClaims{
-		"id":  u.Id,
-		"exp": time.Now().Add(time.Hour * 48).Unix(),
-	}
-
-	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
-
-	refreshString, err := refreshToken.SignedString([]byte(secret))
-
-	return map[string]string{
-		"token":         tokenString,
-		"refresh_token": refreshString,
-	}, err
 }

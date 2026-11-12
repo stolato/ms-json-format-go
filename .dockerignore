@@ -1,0 +1,12 @@
+# Segredos e arquivos locais não devem entrar no contexto de build da imagem
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+.idea
+.openidea
+.claude
+tmp
+*.log
+docker-compose.yml
