@@ -14,6 +14,7 @@ const (
 	collOrganizations      = "organization"
 	collSessions           = "sessions"
 	collEmailVerifications = "email_verifications"
+	collPasswordResets     = "password_resets"
 )
 
 // Repositories agrupa todos os repositórios da aplicação, criados sobre o
@@ -24,6 +25,7 @@ type Repositories struct {
 	Organizations      OrganizationRepository
 	Sessions           SessionRepository
 	EmailVerifications EmailVerificationRepository
+	PasswordResets     PasswordResetRepository
 }
 
 type Options struct {
@@ -39,6 +41,7 @@ func New(db *mongo.Database, opts Options) *Repositories {
 		Organizations:      NewOrganizationRepository(db),
 		Sessions:           NewSessionRepository(db),
 		EmailVerifications: NewEmailVerificationRepository(db),
+		PasswordResets:     NewPasswordResetRepository(db),
 	}
 }
 
@@ -52,6 +55,7 @@ func (r *Repositories) EnsureIndexes() error {
 		{"items (slug único)", r.Items.EnsureIndexes},
 		{"users (email único; há emails duplicados?)", r.Users.EnsureIndexes},
 		{"email_verifications", r.EmailVerifications.EnsureIndexes},
+		{"password_resets", r.PasswordResets.EnsureIndexes},
 		{"sessions", r.Sessions.EnsureIndexes},
 	}
 	var errs []error

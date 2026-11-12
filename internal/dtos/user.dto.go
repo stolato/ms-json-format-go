@@ -10,3 +10,12 @@ type UserRegisterDTO struct {
 	Active  bool   `json:"active" bson:"active"`
 	Setting string `json:"settings" bson:"settings"`
 }
+
+type ForgotPasswordDTO struct {
+	Email string `json:"email" validate:"required,max=254,email"`
+}
+
+type ResetPasswordDTO struct {
+	Token    string `json:"token" validate:"required,max=128"`
+	Password string `json:"password" validate:"required,min=6,max=72"`
+}

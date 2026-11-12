@@ -66,6 +66,15 @@ Guarde essa chave fora do banco e dos backups: **se ela for perdida, os JSONs n�
 - Só contas com email confirmado podem ser adicionadas a organizações. Contas criadas antes
   da verificação existir são tratadas como verificadas.
 
+### Redefinição de senha
+
+- `POST /forgot-password` com `{ email }` envia o link `APP_URL/reset-password?token=...`
+  (válido por 1h, uso único; no máximo 1 email por minuto por conta). A resposta é sempre
+  `Success`, exista a conta ou não.
+- A página do front envia `POST /reset-password` com `{ token, password }`. Ao concluir, o
+  email da conta passa a constar como verificado e **todas as sessões são encerradas**
+  (o usuário precisa fazer login de novo).
+
 ## Links (slug)
 
 Cada item tem um `slug` aleatório de 22 caracteres (128 bits), usado nos links e na API:
@@ -99,6 +108,8 @@ Excedido o limite, a resposta é `429 { "message": "TOO_MANY_REQUESTS" }` com `R
 | `POST /register` | 5/hora por IP |
 | `POST /refresh` | 30/min por IP |
 | `POST /verify-email` | 10/min por IP |
+| `POST /forgot-password` | 5/15min por IP |
+| `POST /reset-password` | 10/min por IP |
 | `POST /items` | 30/min por usuário (ou IP, se anônimo) |
 | `PUT /items/:id` | 120/min por usuário (ou IP, se anônimo) |
 | `POST /items/:id/reveal` | 30/min por usuário (ou IP, se anônimo) |

@@ -19,15 +19,17 @@ type AuthHandler struct {
 	repo          repositories.UserRepository
 	sessions      repositories.SessionRepository
 	verifications repositories.EmailVerificationRepository
+	resets        repositories.PasswordResetRepository
 	// appURL é a URL do front (sem barra final), usada nos links dos emails.
 	appURL string
 }
 
-func NewAuthHandler(repo repositories.UserRepository, sessions repositories.SessionRepository, verifications repositories.EmailVerificationRepository, appURL string) *AuthHandler {
+func NewAuthHandler(repo repositories.UserRepository, sessions repositories.SessionRepository, verifications repositories.EmailVerificationRepository, resets repositories.PasswordResetRepository, appURL string) *AuthHandler {
 	return &AuthHandler{
 		repo:          repo,
 		sessions:      sessions,
 		verifications: verifications,
+		resets:        resets,
 		appURL:        appURL,
 	}
 }

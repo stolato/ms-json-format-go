@@ -33,6 +33,9 @@ type UserRepository interface {
 	FindActiveByEmail(email string) (models.User, error)
 	// MarkEmailVerified confirma o email do usuário, se ainda for o mesmo.
 	MarkEmailVerified(userID, email string) error
+	// ResetPassword troca a senha (já em hash) do usuário ativo, se o email
+	// ainda for o mesmo do pedido, e marca o email como verificado.
+	ResetPassword(userID, email, passwordHash string) error
 	FindMe(user *models.User) (models.User, error)
 	UpdateSettings(userId string, settings string)
 }
@@ -103,6 +106,29 @@ func (r *userRepository) MarkEmailVerified(userID, email string) error {
 	}
 	if res.MatchedCount == 0 {
 		return ErrVerificationInvalid
+	}
+	return nil
+}
+
+func (r *userRepository) ResetPassword(userID, email, passwordHash string) error {
+	_id, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return err
+	}
+	res, err := r.users.UpdateOne(context.TODO(),
+		bson.D{{"_id", _id}, {"email", NormalizeEmail(email)}, {"active", true}},
+		bson.D{{"$set", bson.D{
+			{"password", passwordHash},
+			{"emailVerified", true},
+			{"updateAt", time.Now()},
+		}}},
+		options.Update().SetCollation(emailCollation),
+	)
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 0 {
+		return ErrTokenInvalid
 	}
 	return nil
 }

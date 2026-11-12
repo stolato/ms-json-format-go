@@ -12,7 +12,7 @@ import (
 // pelo chamador (cmd/main.go) e compartilhados com o websocket.
 func SetupRoutes(app *fiber.App, repos *repositories.Repositories, authMW *middleware.Auth, appURL string) {
 	itemsHandler := handlers.NewItemsHandler(repos.Items, repos.Organizations)
-	authHandler := handlers.NewAuthHandler(repos.Users, repos.Sessions, repos.EmailVerifications, appURL)
+	authHandler := handlers.NewAuthHandler(repos.Users, repos.Sessions, repos.EmailVerifications, repos.PasswordResets, appURL)
 	userHandler := handlers.NewUserHandler(repos.Users)
 	orgHandler := handlers.NewOrganizationHandler(repos.Organizations)
 
@@ -28,6 +28,8 @@ func SetupRoutes(app *fiber.App, repos *repositories.Repositories, authMW *middl
 	app.Post("/logout-all", authMW.Required, authHandler.LogoutAll)
 	app.Post("/verify-email", middleware.VerifyEmailRateLimit, authHandler.VerifyEmail)
 	app.Post("/verify-email/resend", authMW.Required, authHandler.ResendVerification)
+	app.Post("/forgot-password", middleware.ForgotPasswordRateLimit, authHandler.ForgotPassword)
+	app.Post("/reset-password", middleware.ResetPasswordRateLimit, authHandler.ResetPassword)
 
 	userRouter := app.Group("/user", authMW.Required)
 	userRouter.Get("/me", userHandler.Me)

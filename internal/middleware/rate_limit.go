@@ -68,6 +68,11 @@ var (
 	RefreshRateLimit     = newLimiter("refresh", 30, time.Minute, byIP)
 	VerifyEmailRateLimit = newLimiter("verify-email", 10, time.Minute, byIP)
 
+	// Reset de senha: pedir o email é bem restrito (cada pedido dispara um
+	// envio); usar o token segue o mesmo limite da verificação de email.
+	ForgotPasswordRateLimit = newLimiter("forgot-password", 5, 15*time.Minute, byIP)
+	ResetPasswordRateLimit  = newLimiter("reset-password", 10, time.Minute, byIP)
+
 	// Itens: criar é mais restrito; editar é mais folgado por causa da edição ao vivo.
 	CreateItemRateLimit = newLimiter("items-create", 30, time.Minute, byUserOrIP)
 	UpdateItemRateLimit = newLimiter("items-update", 120, time.Minute, byUserOrIP)
