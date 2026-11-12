@@ -4,11 +4,13 @@ services:
     build: .
     ports:
       - "8000:8000"
-      - "9091:9091"
+      - "8001:8001"
     env_file:
       - .env
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=tempo:4318
+      # Prometheus coleta pela rede interna do compose; a porta não é publicada.
+      - METRICS_ADDR=:9091
     depends_on:
       - tempo
     networks:

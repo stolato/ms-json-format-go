@@ -6,12 +6,10 @@ import (
 	"api-go/internal/repositories"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/stolato/validator_fiber"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -27,15 +25,12 @@ func NewOrganizationHandler(repo repositories.OrganizationRepository) *Organizat
 
 func (repo *OrganizationHandler) FindAllTimes(c fiber.Ctx) error {
 	userID, _ := c.Locals("user_id").(string)
-	limit := c.Query("limit", "20")
-	page := c.Query("page", "0")
-
-	limit64, _ := strconv.ParseInt(limit, 10, 64)
-	page64, _ := strconv.ParseInt(page, 10, 64)
+	page64, limit64 := parsePagination(c)
 
 	results, err := repo.organizationRepo.FindAllMyOrgs(userID, page64, limit64)
 	if err != nil {
 		slog.Error(err.Error())
+		return c.Status(fiber.StatusInternalServerError).JSON(map[string]string{"message": "INTERNAL_ERROR"})
 	}
 	return c.JSON(results)
 }
@@ -45,7 +40,7 @@ func (repo *OrganizationHandler) AddTime(c fiber.Ctx) error {
 	var dto dtos.OrganizationStoreDTO
 	var itemSave models.OrganizationModel
 	if err := c.Bind().Body(&dto); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(map[string]string{"message": err.Error()})
+		return invalidBody(c)
 	}
 	if errs := validator_fiber.Validator(dto); errs != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(errs)
@@ -61,7 +56,7 @@ func (repo *OrganizationHandler) AddTime(c fiber.Ctx) error {
 	itemSave.UpdateAt = time.Now()
 	saveItem, err := repo.organizationRepo.Store(itemSave)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(map[string]string{"message": err.Error()})
+		return respondError(c, err)
 	}
 	return c.JSON(saveItem)
 }
@@ -74,9 +69,11 @@ func (repo *OrganizationHandler) DeleteOrganization(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(map[string]string{"message": "Not object to mongoID"})
 	}
 
-	result, err := repo.organizationRepo.Delete(bson.D{{"_id", _id}, {"ownerId", userID}})
+	ownerID, _ := userID.(string)
+	result, err := repo.organizationRepo.DeleteOwned(_id, ownerID)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(err)
+		slog.Error("delete org", "error", err)
+		return c.Status(fiber.StatusBadRequest).JSON(map[string]string{"message": "not possible delete org"})
 	}
 	return c.JSON(result)
 }
@@ -90,14 +87,14 @@ func (repo *OrganizationHandler) AddUser(c fiber.Ctx) error {
 	}
 	var addDto dtos.AddUserOrganizationDTO
 	if err := c.Bind().Body(&addDto); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(map[string]string{"message": err.Error()})
+		return invalidBody(c)
 	}
 	if errs := validator_fiber.Validator(addDto); errs != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(errs)
 	}
 	saveItem, err := repo.organizationRepo.AddUser(addDto, _id, userID)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(err)
+		return respondError(c, err)
 	}
 	return c.JSON(saveItem)
 }
@@ -112,7 +109,7 @@ func (repo *OrganizationHandler) RemoveUser(c fiber.Ctx) error {
 	}
 	removeUser, err := repo.organizationRepo.RemoveUser(userId, _id, userID)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(err)
+		return respondError(c, err)
 	}
 	return c.JSON(removeUser)
 }

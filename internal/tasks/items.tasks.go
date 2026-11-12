@@ -3,40 +3,30 @@ package tasks
 import (
 	"api-go/internal/database"
 	"api-go/internal/repositories"
-	"fmt"
 	"log"
 	"time"
 
-	"github.com/robfig/cron"
-	"go.mongodb.org/mongo-driver/bson"
+	"github.com/robfig/cron/v3"
 )
 
+// cleanupSchedule: todo dia às 01:00:00 (formato com segundos).
+const cleanupSchedule = "0 0 1 * * *"
+
+// HandleTask agenda a limpeza diária (01:00) de itens anônimos expirados.
 func HandleTask() {
 	log.Println("Iniciando tarefas")
 	repo := repositories.NewItemsRepository(database.DB)
-	c := cron.New()
+	// WithSeconds: mantém o formato de 6 campos (com segundos) da v1.
+	c := cron.New(cron.WithSeconds())
 	c.Start()
 
-	err := c.AddFunc("0 0 1 * * *", func() {
-		fmt.Println("Minha tarefa foi executada às", time.Now())
-		results, err := repo.FindAll(bson.D{
-			{"user_id", bson.D{
-				{"$in", bson.A{nil}},
-			}},
-			{"expirateAt", bson.D{
-				{"$lte", time.Now()},
-			}},
-		}, 0, 0)
+	_, err := c.AddFunc(cleanupSchedule, func() {
+		removed, err := repo.DeleteExpiredAnonymous(time.Now())
 		if err != nil {
-			log.Println(err.Error())
+			log.Println("limpeza de itens anônimos expirados falhou:", err)
+			return
 		}
-		for _, data := range results.Data {
-			_, err := repo.DeleteItem(data.Id, "")
-			if err != nil {
-				log.Println(err.Error())
-			}
-		}
-		log.Println("removed", len(results.Data))
+		log.Println("limpeza de itens anônimos expirados: removidos", removed)
 	})
 	if err != nil {
 		log.Fatalln(err.Error())
