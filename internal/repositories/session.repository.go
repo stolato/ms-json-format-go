@@ -3,15 +3,12 @@ package repositories
 import (
 	"context"
 	"errors"
-	"os"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
-
-var collectionSessions = "sessions"
 
 const (
 	// Janela em que reapresentar o refresh token imediatamente anterior é
@@ -54,19 +51,15 @@ type sessionDoc struct {
 }
 
 type sessionRepository struct {
-	DB *mongo.Client
+	sessions *mongo.Collection
 }
 
-func NewSessionRepository(db *mongo.Client) SessionRepository {
-	return &sessionRepository{DB: db}
-}
-
-func (r *sessionRepository) coll() *mongo.Collection {
-	return r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionSessions)
+func NewSessionRepository(db *mongo.Database) SessionRepository {
+	return &sessionRepository{sessions: db.Collection(collSessions)}
 }
 
 func (r *sessionRepository) EnsureIndexes() error {
-	_, err := r.coll().Indexes().CreateMany(context.TODO(), []mongo.IndexModel{
+	_, err := r.sessions.Indexes().CreateMany(context.TODO(), []mongo.IndexModel{
 		{Keys: bson.D{{"user_id", 1}}},
 		// Remove automaticamente sessões expiradas.
 		{Keys: bson.D{{"expiresAt", 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
@@ -76,7 +69,7 @@ func (r *sessionRepository) EnsureIndexes() error {
 
 func (r *sessionRepository) Create(sid, userID, refreshHash string, expiresAt time.Time) error {
 	now := time.Now()
-	_, err := r.coll().InsertOne(context.TODO(), sessionDoc{
+	_, err := r.sessions.InsertOne(context.TODO(), sessionDoc{
 		ID:             sid,
 		UserID:         userID,
 		RefreshHash:    refreshHash,
@@ -91,7 +84,7 @@ func (r *sessionRepository) Create(sid, userID, refreshHash string, expiresAt ti
 func (r *sessionRepository) Rotate(sid, currentHash, newHash string, expiresAt time.Time) (RotateResult, string, error) {
 	now := time.Now()
 	var doc sessionDoc
-	err := r.coll().FindOneAndUpdate(context.TODO(),
+	err := r.sessions.FindOneAndUpdate(context.TODO(),
 		bson.D{
 			{"_id", sid},
 			{"refresh_hash", currentHash},
@@ -117,7 +110,7 @@ func (r *sessionRepository) Rotate(sid, currentHash, newHash string, expiresAt t
 	}
 
 	// Não rotacionou: descobrir se é um token antigo desta sessão (reuso).
-	err = r.coll().FindOne(context.TODO(), bson.D{{"_id", sid}}).Decode(&doc)
+	err = r.sessions.FindOne(context.TODO(), bson.D{{"_id", sid}}).Decode(&doc)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return RotateInvalid, "", nil
 	}
@@ -141,7 +134,7 @@ func (r *sessionRepository) Rotate(sid, currentHash, newHash string, expiresAt t
 }
 
 func (r *sessionRepository) IsActive(sid, userID string) (bool, error) {
-	n, err := r.coll().CountDocuments(context.TODO(), bson.D{
+	n, err := r.sessions.CountDocuments(context.TODO(), bson.D{
 		{"_id", sid},
 		{"user_id", userID},
 		{"expiresAt", bson.D{{"$gt", time.Now()}}},
@@ -150,7 +143,7 @@ func (r *sessionRepository) IsActive(sid, userID string) (bool, error) {
 }
 
 func (r *sessionRepository) Revoke(sid, refreshHash string) error {
-	_, err := r.coll().DeleteOne(context.TODO(), bson.D{
+	_, err := r.sessions.DeleteOne(context.TODO(), bson.D{
 		{"_id", sid},
 		{"$or", bson.A{
 			bson.D{{"refresh_hash", refreshHash}},
@@ -161,6 +154,6 @@ func (r *sessionRepository) Revoke(sid, refreshHash string) error {
 }
 
 func (r *sessionRepository) RevokeAllForUser(userID string) error {
-	_, err := r.coll().DeleteMany(context.TODO(), bson.D{{"user_id", userID}})
+	_, err := r.sessions.DeleteMany(context.TODO(), bson.D{{"user_id", userID}})
 	return err
 }

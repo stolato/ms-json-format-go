@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"api-go/dtos"
+	"api-go/internal/dtos"
 	"api-go/internal/models"
 	"api-go/internal/repositories"
 	"fmt"

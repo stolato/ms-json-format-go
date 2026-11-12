@@ -10,7 +10,9 @@ import (
 
 func setup(t *testing.T) {
 	t.Helper()
-	t.Setenv("JWT_SECRET", strings.Repeat("k", 48))
+	if err := Init(strings.Repeat("k", 48)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestAccessRoundTrip(t *testing.T) {
@@ -91,16 +93,13 @@ func TestRefreshToken(t *testing.T) {
 }
 
 func TestInitRequiresStrongSecret(t *testing.T) {
-	t.Setenv("JWT_SECRET", "")
-	if Init() == nil {
+	if Init("") == nil {
 		t.Fatal("aceitou segredo vazio")
 	}
-	t.Setenv("JWT_SECRET", "curto")
-	if Init() == nil {
+	if Init("curto") == nil {
 		t.Fatal("aceitou segredo curto")
 	}
-	setup(t)
-	if err := Init(); err != nil {
+	if err := Init(strings.Repeat("k", 48)); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -1,62 +1,77 @@
-// Package mailer envia emails via SMTP (funciona com qualquer provedor:
-// Resend, SES, Mailgun, Gmail...).
+// Package mailer envia emails via Amazon SES (API v2).
 //
-// Variáveis de ambiente:
+// Configuração (lida em internal/config):
 //
-//	SMTP_HOST, SMTP_PORT (padrão 587; 465 = TLS implícito), SMTP_USER,
-//	SMTP_PASSWORD, SMTP_FROM
-//	MAIL_DEV_LOG=true  -> sem SMTP_HOST, registra o email no log em vez de enviar
-//	                      (somente para desenvolvimento: o log conterá o link).
+//	SES_FROM               remetente verificado no SES (ex.: "Json Format <no-reply@dominio.com>")
+//	AWS_REGION             região do SES (ex.: us-east-1, sa-east-1)
+//	SES_CONFIGURATION_SET  opcional: configuration set para eventos/métricas
+//	MAIL_DEV_LOG=true      sem SES_FROM, registra o email no log em vez de enviar
+//	                       (somente para desenvolvimento: o log conterá o link).
+//
+// Credenciais seguem a cadeia padrão da AWS: AWS_ACCESS_KEY_ID /
+// AWS_SECRET_ACCESS_KEY, AWS_PROFILE, ou role da instância/task (IAM).
 package mailer
 
 import (
-	"crypto/tls"
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
-	"mime"
-	"net"
 	"net/mail"
-	"net/smtp"
-	"os"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sesv2"
+	"github.com/aws/aws-sdk-go-v2/service/sesv2/types"
+
+	appconfig "api-go/internal/config"
 )
 
+const sendTimeout = 15 * time.Second
+
 type config struct {
-	host, port, user, password, from string
-	devLog                           bool
+	from, configSet string
+	devLog          bool
+	client          *sesv2.Client
 }
 
 var cfg config
 
-var ErrNotConfigured = errors.New("envio de email não configurado (SMTP_HOST)")
+var ErrNotConfigured = errors.New("envio de email não configurado (SES_FROM)")
 
-// Init lê a configuração. Sem SMTP_HOST o servidor sobe, mas emails não são
-// enviados (a menos que MAIL_DEV_LOG=true).
-func Init() error {
+// Init aplica a configuração. Sem SES_FROM o servidor sobe, mas emails não
+// são enviados (a menos que MAIL_DEV_LOG=true).
+func Init(mc appconfig.Mail) error {
 	cfg = config{
-		host:     os.Getenv("SMTP_HOST"),
-		port:     os.Getenv("SMTP_PORT"),
-		user:     os.Getenv("SMTP_USER"),
-		password: os.Getenv("SMTP_PASSWORD"),
-		from:     os.Getenv("SMTP_FROM"),
-		devLog:   os.Getenv("MAIL_DEV_LOG") == "true",
+		from:      mc.From,
+		configSet: mc.ConfigurationSet,
+		devLog:    mc.DevLog,
 	}
-	if cfg.port == "" {
-		cfg.port = "587"
-	}
-	if cfg.host == "" {
+	if cfg.from == "" {
 		if cfg.devLog {
 			slog.Warn("mailer: MAIL_DEV_LOG=true, emails serão apenas registrados no log (não use em produção)")
 		} else {
-			slog.Warn("mailer: SMTP_HOST não definido, emails de verificação não serão enviados")
+			slog.Warn("mailer: SES_FROM não definido, emails de verificação não serão enviados")
 		}
 		return nil
 	}
 	if _, err := mail.ParseAddress(cfg.from); err != nil {
-		return fmt.Errorf("SMTP_FROM inválido: %w", err)
+		return fmt.Errorf("SES_FROM inválido: %w", err)
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("mailer: falha ao carregar configuração AWS: %w", err)
+	}
+	if awsCfg.Region == "" {
+		return errors.New("mailer: AWS_REGION não definido")
+	}
+	cfg.client = sesv2.NewFromConfig(awsCfg)
 	return nil
 }
 
@@ -65,7 +80,7 @@ func Send(to, subject, body string) error {
 	if _, err := mail.ParseAddress(to); err != nil || strings.ContainsAny(to, "\r\n") {
 		return fmt.Errorf("destinatário inválido")
 	}
-	if cfg.host == "" {
+	if cfg.client == nil {
 		if cfg.devLog {
 			slog.Info("mailer (dev): email não enviado", "to", to, "subject", subject, "body", body)
 			return nil
@@ -73,61 +88,55 @@ func Send(to, subject, body string) error {
 		return ErrNotConfigured
 	}
 
-	msg := strings.Join([]string{
-		"From: " + cfg.from,
-		"To: " + to,
-		"Subject: " + mime.QEncoding.Encode("utf-8", subject),
-		"Date: " + time.Now().Format(time.RFC1123Z),
-		"MIME-Version: 1.0",
-		"Content-Type: text/plain; charset=utf-8",
-		"Content-Transfer-Encoding: 8bit",
-		"",
-		body,
-	}, "\r\n")
-
-	fromAddr, _ := mail.ParseAddress(cfg.from)
-	var auth smtp.Auth
-	if cfg.user != "" {
-		// PlainAuth recusa enviar credenciais sem TLS (exceto para localhost).
-		auth = smtp.PlainAuth("", cfg.user, cfg.password, cfg.host)
+	input := &sesv2.SendEmailInput{
+		FromEmailAddress: aws.String(cfg.from),
+		Destination:      &types.Destination{ToAddresses: []string{to}},
+		Content: &types.EmailContent{
+			Simple: &types.Message{
+				Subject: &types.Content{Data: aws.String(subject), Charset: aws.String("UTF-8")},
+				Body: &types.Body{
+					Text: &types.Content{Data: aws.String(body), Charset: aws.String("UTF-8")},
+				},
+			},
+		},
 	}
-	addr := net.JoinHostPort(cfg.host, cfg.port)
-
-	if cfg.port != "465" {
-		// SendMail usa STARTTLS automaticamente quando o servidor oferece.
-		return smtp.SendMail(addr, auth, fromAddr.Address, []string{to}, []byte(msg))
+	if cfg.configSet != "" {
+		input.ConfigurationSetName = aws.String(cfg.configSet)
 	}
 
-	// Porta 465: TLS implícito.
-	conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: cfg.host, MinVersion: tls.VersionTLS12})
-	if err != nil {
-		return err
-	}
-	c, err := smtp.NewClient(conn, cfg.host)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	if auth != nil {
-		if err := c.Auth(auth); err != nil {
-			return err
+	ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
+	defer cancel()
+	_, err := cfg.client.SendEmail(ctx, input)
+	return err
+}
+
+// inflight conta os envios assíncronos em andamento, para o shutdown esperar.
+var inflight sync.WaitGroup
+
+// SendAsync envia em segundo plano (para não atrasar a resposta HTTP). Falhas
+// vão para onError. O shutdown espera os envios pendentes com Wait.
+func SendAsync(to, subject, body string, onError func(error)) {
+	inflight.Add(1)
+	go func() {
+		defer inflight.Done()
+		if err := Send(to, subject, body); err != nil && onError != nil {
+			onError(err)
 		}
+	}()
+}
+
+// Wait espera os envios de SendAsync terminarem ou ctx acabar. Chame depois
+// que o servidor HTTP parou de atender, para não surgirem envios novos.
+func Wait(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		inflight.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("mailer: envios pendentes não terminaram: %w", ctx.Err())
 	}
-	if err := c.Mail(fromAddr.Address); err != nil {
-		return err
-	}
-	if err := c.Rcpt(to); err != nil {
-		return err
-	}
-	w, err := c.Data()
-	if err != nil {
-		return err
-	}
-	if _, err := w.Write([]byte(msg)); err != nil {
-		return err
-	}
-	if err := w.Close(); err != nil {
-		return err
-	}
-	return c.Quit()
 }

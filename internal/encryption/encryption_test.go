@@ -12,8 +12,7 @@ func setup(t *testing.T) {
 	if _, err := rand.Read(key); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(envKey, base64.StdEncoding.EncodeToString(key))
-	if err := Init(); err != nil {
+	if err := Init(base64.StdEncoding.EncodeToString(key)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -74,12 +73,10 @@ func TestLegacyPlaintextPassthrough(t *testing.T) {
 }
 
 func TestInitRejectsBadKey(t *testing.T) {
-	t.Setenv(envKey, base64.StdEncoding.EncodeToString([]byte("curta")))
-	if err := Init(); err == nil {
+	if err := Init(base64.StdEncoding.EncodeToString([]byte("curta"))); err == nil {
 		t.Fatal("esperava erro com chave curta")
 	}
-	t.Setenv(envKey, "")
-	if err := Init(); err == nil {
+	if err := Init(""); err == nil {
 		t.Fatal("esperava erro com chave vazia")
 	}
 }

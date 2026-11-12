@@ -10,7 +10,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -22,10 +21,9 @@ const envKey = "JSON_ENCRYPTION_KEY"
 
 var aead cipher.AEAD
 
-// Init carrega a chave de JSON_ENCRYPTION_KEY (32 bytes em base64).
+// Init carrega a chave (JSON_ENCRYPTION_KEY: 32 bytes em base64).
 // Gere com: openssl rand -base64 32
-func Init() error {
-	encoded := os.Getenv(envKey)
+func Init(encoded string) error {
 	if encoded == "" {
 		return fmt.Errorf("%s não definida", envKey)
 	}

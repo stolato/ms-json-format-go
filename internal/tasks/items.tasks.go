@@ -1,7 +1,6 @@
 package tasks
 
 import (
-	"api-go/internal/database"
 	"api-go/internal/repositories"
 	"log"
 	"time"
@@ -12,14 +11,13 @@ import (
 // cleanupSchedule: todo dia às 01:00:00 (formato com segundos).
 const cleanupSchedule = "0 0 1 * * *"
 
-// HandleTask agenda a limpeza diária (01:00) de itens anônimos expirados.
-func HandleTask() {
+// Start agenda a limpeza diária (01:00) de itens anônimos expirados. Quem
+// chama deve encerrar com Stop(), cujo contexto termina quando a execução em
+// andamento (se houver) acabar.
+func Start(repo repositories.ItemsRepository) (*cron.Cron, error) {
 	log.Println("Iniciando tarefas")
-	repo := repositories.NewItemsRepository(database.DB)
 	// WithSeconds: mantém o formato de 6 campos (com segundos) da v1.
 	c := cron.New(cron.WithSeconds())
-	c.Start()
-
 	_, err := c.AddFunc(cleanupSchedule, func() {
 		removed, err := repo.DeleteExpiredAnonymous(time.Now())
 		if err != nil {
@@ -29,6 +27,8 @@ func HandleTask() {
 		log.Println("limpeza de itens anônimos expirados: removidos", removed)
 	})
 	if err != nil {
-		log.Fatalln(err.Error())
+		return nil, err
 	}
+	c.Start()
+	return c, nil
 }

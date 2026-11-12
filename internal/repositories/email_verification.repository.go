@@ -3,15 +3,12 @@ package repositories
 import (
 	"context"
 	"errors"
-	"os"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
-
-var collectionEmailVerifications = "email_verifications"
 
 var ErrVerificationInvalid = errors.New("invalid or expired verification token")
 
@@ -36,19 +33,15 @@ type emailVerificationDoc struct {
 }
 
 type emailVerificationRepository struct {
-	DB *mongo.Client
+	verifications *mongo.Collection
 }
 
-func NewEmailVerificationRepository(db *mongo.Client) EmailVerificationRepository {
-	return &emailVerificationRepository{DB: db}
-}
-
-func (r *emailVerificationRepository) coll() *mongo.Collection {
-	return r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionEmailVerifications)
+func NewEmailVerificationRepository(db *mongo.Database) EmailVerificationRepository {
+	return &emailVerificationRepository{verifications: db.Collection(collEmailVerifications)}
 }
 
 func (r *emailVerificationRepository) EnsureIndexes() error {
-	_, err := r.coll().Indexes().CreateMany(context.TODO(), []mongo.IndexModel{
+	_, err := r.verifications.Indexes().CreateMany(context.TODO(), []mongo.IndexModel{
 		{Keys: bson.D{{"user_id", 1}, {"createdAt", -1}}},
 		{Keys: bson.D{{"expiresAt", 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	})
@@ -56,7 +49,7 @@ func (r *emailVerificationRepository) EnsureIndexes() error {
 }
 
 func (r *emailVerificationRepository) Create(tokenHash, userID, email string, expiresAt time.Time) error {
-	_, err := r.coll().InsertOne(context.TODO(), emailVerificationDoc{
+	_, err := r.verifications.InsertOne(context.TODO(), emailVerificationDoc{
 		ID:        tokenHash,
 		UserID:    userID,
 		Email:     email,
@@ -68,7 +61,7 @@ func (r *emailVerificationRepository) Create(tokenHash, userID, email string, ex
 
 func (r *emailVerificationRepository) Consume(tokenHash string) (string, string, error) {
 	var doc emailVerificationDoc
-	err := r.coll().FindOneAndDelete(context.TODO(), bson.D{
+	err := r.verifications.FindOneAndDelete(context.TODO(), bson.D{
 		{"_id", tokenHash},
 		{"expiresAt", bson.D{{"$gt", time.Now()}}},
 	}).Decode(&doc)
@@ -83,7 +76,7 @@ func (r *emailVerificationRepository) Consume(tokenHash string) (string, string,
 
 func (r *emailVerificationRepository) LastCreatedAt(userID string) (time.Time, error) {
 	var doc emailVerificationDoc
-	err := r.coll().FindOne(context.TODO(), bson.D{{"user_id", userID}},
+	err := r.verifications.FindOne(context.TODO(), bson.D{{"user_id", userID}},
 		options.FindOne().SetSort(bson.D{{"createdAt", -1}}),
 	).Decode(&doc)
 	if errors.Is(err, mongo.ErrNoDocuments) {
@@ -93,6 +86,6 @@ func (r *emailVerificationRepository) LastCreatedAt(userID string) (time.Time, e
 }
 
 func (r *emailVerificationRepository) DeleteForUser(userID string) error {
-	_, err := r.coll().DeleteMany(context.TODO(), bson.D{{"user_id", userID}})
+	_, err := r.verifications.DeleteMany(context.TODO(), bson.D{{"user_id", userID}})
 	return err
 }

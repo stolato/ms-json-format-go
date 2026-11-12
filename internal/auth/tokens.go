@@ -14,7 +14,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -42,17 +41,20 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// Init garante que JWT_SECRET existe e é longo o bastante. Com segredo vazio
-// qualquer pessoa conseguiria assinar tokens válidos.
-func Init() error {
-	if len(os.Getenv("JWT_SECRET")) < minSecretLength {
+var jwtSecret []byte
+
+// Init define o segredo de assinatura (JWT_SECRET), exigindo um tamanho
+// mínimo. Com segredo vazio qualquer pessoa conseguiria assinar tokens válidos.
+func Init(secret string) error {
+	if len(secret) < minSecretLength {
 		return fmt.Errorf("JWT_SECRET deve ter pelo menos %d caracteres (gere com: openssl rand -base64 48)", minSecretLength)
 	}
+	jwtSecret = []byte(secret)
 	return nil
 }
 
 func secret() []byte {
-	return []byte(os.Getenv("JWT_SECRET"))
+	return jwtSecret
 }
 
 // NewAccessToken emite um access token vinculado à sessão sid.

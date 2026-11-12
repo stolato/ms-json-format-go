@@ -15,7 +15,6 @@ Microserviço para salvar e compartilhar JSONs formatados. Não requer cadastro 
 - **Banco:** MongoDB
 - **Auth:** JWT
 - **Tempo real:** Socket.io (servidor `zishang520/socket.io` v3, protocolo v4: clientes `socket.io-client` 4.x)
-- **Observabilidade:** OpenTelemetry → Grafana Tempo (traces) + Prometheus (métricas) + Grafana (dashboard)
 
 ## Variáveis de ambiente
 
@@ -26,17 +25,15 @@ PORT=8000
 MONGODB_URI=mongodb+srv://<user>:<password>@cluster.mongodb.net/
 MONGO_DATABASE=dbitems
 JWT_SECRET=<mínimo 32 caracteres; gere com: openssl rand -base64 48>
-OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4318
 JSON_ENCRYPTION_KEY=<gere com: openssl rand -base64 32>
 
-# Verificação de email (qualquer provedor SMTP: Resend, SES, Mailgun, Gmail...)
+# Verificação de email (Amazon SES)
 APP_URL=https://seu-front.com          # o link enviado é APP_URL/verify-email?token=...
-SMTP_HOST=smtp.seu-provedor.com
-SMTP_PORT=587                           # 465 = TLS implícito
-SMTP_USER=
-SMTP_PASSWORD=
-SMTP_FROM=Json Format <no-reply@seu-dominio.com>
-# MAIL_DEV_LOG=true                     # dev: sem SMTP, registra o email no log
+SES_FROM=Json Format <no-reply@seu-dominio.com>   # identidade verificada no SES
+AWS_REGION=us-east-1
+# AWS_ACCESS_KEY_ID= / AWS_SECRET_ACCESS_KEY=      # ou AWS_PROFILE / role IAM (precisa de ses:SendEmail)
+# SES_CONFIGURATION_SET=                # opcional
+# MAIL_DEV_LOG=true                     # dev: sem SES_FROM, registra o email no log
 
 # Atrás de proxy/load balancer (nginx, Cloudflare, Traefik...)
 # SOCKET_CORS_ORIGINS=https://seu-front.com   # origens aceitas no websocket (padrão: todas)
@@ -123,14 +120,9 @@ go run cmd/main.go
 docker compose up
 ```
 
-| Serviço    | URL                    |
-|------------|------------------------|
-| API        | http://localhost:8000  |
-| Grafana    | http://localhost:3000  |
-| Prometheus | http://localhost:9090  |
-| Tempo      | http://localhost:3200  |
-
-O dashboard **HTTP Requests** é provisionado automaticamente no Grafana com painéis de request rate, error rate, latência P50/P99 e distribuição de status codes por rota.
+| Serviço | URL                   |
+|---------|-----------------------|
+| API     | http://localhost:8000 |
 
 ## API
 

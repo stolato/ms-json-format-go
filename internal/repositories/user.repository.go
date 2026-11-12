@@ -1,10 +1,9 @@
 package repositories
 
 import (
-	"api-go/dtos"
+	"api-go/internal/dtos"
 	"api-go/internal/models"
 	"context"
-	"os"
 	"strings"
 	"time"
 
@@ -14,8 +13,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 )
-
-var collectionUser = "users"
 
 // emailCollation compara emails sem diferenciar maiúsculas/minúsculas. É a
 // mesma collation do índice único, então consultas com ela usam o índice.
@@ -41,17 +38,17 @@ type UserRepository interface {
 }
 
 type userRepository struct {
-	DB *mongo.Client
+	users *mongo.Collection
 }
 
-func NewUserRepository(db *mongo.Client) UserRepository {
-	return &userRepository{DB: db}
+func NewUserRepository(db *mongo.Database) UserRepository {
+	return &userRepository{users: db.Collection(collUsers)}
 }
 
 // EnsureIndexes cria o índice único (case-insensitive) de email. Falha se já
 // existirem emails duplicados no banco; nesse caso resolva-os e reinicie.
 func (r *userRepository) EnsureIndexes() error {
-	_, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionUser).Indexes().CreateOne(context.TODO(), mongo.IndexModel{
+	_, err := r.users.Indexes().CreateOne(context.TODO(), mongo.IndexModel{
 		Keys:    bson.D{{"email", 1}},
 		Options: options.Index().SetUnique(true).SetCollation(emailCollation).SetName("email_unique_ci"),
 	})
@@ -60,7 +57,7 @@ func (r *userRepository) EnsureIndexes() error {
 
 func (r *userRepository) Register(userDto *dtos.UserRegisterDTO) (*mongo.InsertOneResult, error) {
 	email := NormalizeEmail(userDto.Email)
-	coll := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionUser)
+	coll := r.users
 
 	// Checagem prévia (amigável); o índice único é quem garante contra corrida.
 	n, err := coll.CountDocuments(context.TODO(), bson.D{{"email", email}},
@@ -96,7 +93,7 @@ func (r *userRepository) MarkEmailVerified(userID, email string) error {
 	if err != nil {
 		return err
 	}
-	res, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionUser).UpdateOne(context.TODO(),
+	res, err := r.users.UpdateOne(context.TODO(),
 		bson.D{{"_id", _id}, {"email", NormalizeEmail(email)}},
 		bson.D{{"$set", bson.D{{"emailVerified", true}}}},
 		options.Update().SetCollation(emailCollation),
@@ -112,7 +109,7 @@ func (r *userRepository) MarkEmailVerified(userID, email string) error {
 
 func (r *userRepository) FindActiveByEmail(email string) (models.User, error) {
 	result := models.User{}
-	err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionUser).FindOne(context.TODO(),
+	err := r.users.FindOne(context.TODO(),
 		bson.D{{"email", NormalizeEmail(email)}, {"active", true}},
 		options.FindOne().SetCollation(emailCollation),
 	).Decode(&result)
@@ -121,7 +118,7 @@ func (r *userRepository) FindActiveByEmail(email string) (models.User, error) {
 
 func (r *userRepository) FindOne(filter bson.D) (models.User, error) {
 	result := models.User{}
-	err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionUser).FindOne(context.TODO(), filter).Decode(&result)
+	err := r.users.FindOne(context.TODO(), filter).Decode(&result)
 	if err != nil {
 		return result, err
 	}
@@ -140,12 +137,12 @@ func (r *userRepository) UpdateSettings(userId string, settings string) {
 		Upsert:         &upsert,
 	}
 	_id, _ := primitive.ObjectIDFromHex(userId)
-	r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionUser).FindOneAndUpdate(context.TODO(), bson.D{{"_id", _id}}, update, &opt)
+	r.users.FindOneAndUpdate(context.TODO(), bson.D{{"_id", _id}}, update, &opt)
 }
 
 func (r *userRepository) FindMe(user *models.User) (models.User, error) {
 	result := models.User{}
-	err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionUser).FindOne(context.TODO(), bson.D{{"_id", user.Id}}).Decode(&result)
+	err := r.users.FindOne(context.TODO(), bson.D{{"_id", user.Id}}).Decode(&result)
 	return result, err
 }
 

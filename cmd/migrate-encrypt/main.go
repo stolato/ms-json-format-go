@@ -7,6 +7,7 @@
 package main
 
 import (
+	"api-go/internal/config"
 	"api-go/internal/database"
 	"api-go/internal/encryption"
 	"api-go/internal/models"
@@ -15,7 +16,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -23,15 +23,22 @@ func main() {
 	dryRun := flag.Bool("dry-run", false, "apenas conta os itens que seriam migrados")
 	flag.Parse()
 
-	_ = godotenv.Overload(".env")
-	if err := encryption.Init(); err != nil {
+	config.LoadDotEnv()
+	cfg, err := config.Load()
+	if err != nil {
 		log.Fatal(err)
 	}
-	database.Connect()
+	if err := encryption.Init(cfg.EncryptionKey); err != nil {
+		log.Fatal(err)
+	}
 	ctx := context.Background()
-	defer database.DB.Disconnect(ctx)
+	client, err := database.Connect(ctx, cfg.MongoURI)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Disconnect(ctx)
 
-	coll := database.DB.Database(os.Getenv("MONGO_DATABASE")).Collection("items")
+	coll := client.Database(cfg.MongoDatabase).Collection("items")
 	pending := bson.D{{"json", bson.D{{"$not", bson.D{{"$regex", "^" + encryption.Prefix}}}}}}
 
 	total, err := coll.CountDocuments(ctx, pending)

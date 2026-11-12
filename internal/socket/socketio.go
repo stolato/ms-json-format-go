@@ -2,22 +2,19 @@ package socket
 
 import (
 	"api-go/internal/access"
-	"api-go/internal/database"
-	"api-go/internal/middleware"
+	"api-go/internal/auth"
 	"api-go/internal/repositories"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
-	"os"
-	"os/signal"
 	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/zishang520/socket.io/servers/socket/v3"
@@ -67,6 +64,7 @@ const revalidateEvery = 30 * time.Second
 // a sessão: depois de um logout/revogação a conexão deixa de ser autorizada.
 type connState struct {
 	mu            sync.Mutex
+	validate      TokenValidator
 	token         string
 	userID        string
 	lastValidated time.Time
@@ -116,26 +114,51 @@ func (st *connState) currentUser(force bool) (userID string, ok bool) {
 	if !force && time.Since(st.lastValidated) < revalidateEvery {
 		return st.userID, true
 	}
-	if _, err := middleware.ValidateToken(st.token); err != nil {
+	if st.validate == nil {
+		return "", false
+	}
+	if _, err := st.validate(st.token); err != nil {
 		return "", false
 	}
 	st.lastValidated = time.Now()
 	return st.userID, true
 }
 
+// TokenValidator valida o access token e a sessão (ver middleware.Auth.ValidateToken).
+type TokenValidator func(token string) (*auth.Claims, error)
+
 type server struct {
 	items repositories.ItemsRepository
 	orgs  repositories.OrganizationRepository
 }
 
-func SocketI() {
+// Server é o servidor websocket em execução.
+type Server struct {
+	io   *socket.Server
+	http *http.Server
+	errs chan error
+}
+
+// Err recebe um erro se o servidor HTTP do websocket parar sozinho (ex.:
+// porta em uso). Não recebe nada num Shutdown normal.
+func (s *Server) Err() <-chan error { return s.errs }
+
+// Shutdown desconecta os clientes (eles reconectam na próxima instância) e
+// encerra o servidor HTTP, respeitando o prazo de ctx.
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.io.Close(nil)
+	return s.http.Shutdown(ctx)
+}
+
+// Start sobe o servidor websocket em addr. corsOrigins vazio aceita qualquer origem.
+func Start(addr string, items repositories.ItemsRepository, orgs repositories.OrganizationRepository, validate TokenValidator, corsOrigins []string) *Server {
 	srv := &server{
-		items: repositories.NewItemsRepository(database.DB),
-		orgs:  repositories.NewOrganizationRepository(database.DB),
+		items: items,
+		orgs:  orgs,
 	}
 
 	opts := socket.DefaultServerOptions()
-	origins := allowedOrigins()
+	origins := allowedOrigins(corsOrigins)
 	opts.SetCors(&types.Cors{Origin: origins})
 	if list, restricted := origins.([]string); restricted {
 		// CORS só é aplicado pelo navegador; aqui o próprio servidor recusa o
@@ -150,18 +173,23 @@ func SocketI() {
 		})
 	}
 	io := socket.NewServer(nil, opts)
-	http.Handle("/socket.io/", io.ServeHandler(nil))
-	go func() {
+	mux := http.NewServeMux()
+	mux.Handle("/socket.io/", io.ServeHandler(nil))
+	running := &Server{
+		io: io,
 		// Só ReadHeaderTimeout/IdleTimeout: Read/WriteTimeout derrubariam as
 		// conexões websocket, que são longas por natureza.
-		srv := &http.Server{
-			Addr:              ":8001",
+		http: &http.Server{
+			Addr:              addr,
+			Handler:           mux,
 			ReadHeaderTimeout: 10 * time.Second,
 			IdleTimeout:       120 * time.Second,
-		}
-		err := srv.ListenAndServe()
-		if err != nil {
-			fmt.Println(err.Error())
+		},
+		errs: make(chan error, 1),
+	}
+	go func() {
+		if err := running.http.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			running.errs <- fmt.Errorf("websocket: %w", err)
 		}
 	}()
 
@@ -171,9 +199,9 @@ func SocketI() {
 	// io(url, { auth: { token: "<jwt>" } }). Sem token (ou token inválido) a
 	// conexão segue como anônima e só consegue entrar em salas de itens públicos.
 	nsp.Use(func(client *socket.Socket, next func(*socket.ExtendedError)) {
-		st := &connState{}
+		st := &connState{validate: validate}
 		if token := handshakeToken(client); token != "" {
-			if claims, err := middleware.ValidateToken(token); err == nil {
+			if claims, err := validate(token); err == nil {
 				st.token = token
 				st.userID = claims.ID
 				st.lastValidated = time.Now()
@@ -245,40 +273,17 @@ func SocketI() {
 		})
 	})
 
-	exit := make(chan struct{})
-	SignalC := make(chan os.Signal, 1)
-
-	signal.Notify(SignalC, os.Interrupt, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	go func() {
-		for s := range SignalC {
-			switch s {
-			case os.Interrupt, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT:
-				close(exit)
-				return
-			}
-		}
-	}()
-
-	<-exit
-	io.Close(nil)
-	os.Exit(0)
+	return running
 }
 
-// allowedOrigins lê SOCKET_CORS_ORIGINS (lista separada por vírgula). Padrão
-// "*": aceita qualquer origem, como na v2. É seguro porque a autenticação vai
+// allowedOrigins converte SOCKET_CORS_ORIGINS (já separado em config). Vazio
+// = "*": aceita qualquer origem, como na v2. É seguro porque a autenticação vai
 // no token do handshake (não em cookies); restrinja aos domínios do front se
 // quiser uma camada extra. Sem CORS configurado a v3 recusaria o websocket de
 // qualquer outro domínio.
-func allowedOrigins() any {
-	raw := strings.TrimSpace(os.Getenv("SOCKET_CORS_ORIGINS"))
-	if raw == "" || raw == "*" {
+func allowedOrigins(origins []string) any {
+	if len(origins) == 0 {
 		return "*"
-	}
-	var origins []string
-	for _, o := range strings.Split(raw, ",") {
-		if o = strings.TrimSpace(o); o != "" {
-			origins = append(origins, o)
-		}
 	}
 	return origins
 }

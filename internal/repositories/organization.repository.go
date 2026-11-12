@@ -1,20 +1,17 @@
 package repositories
 
 import (
-	"api-go/dtos"
+	"api-go/internal/dtos"
 	"api-go/internal/models"
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
-
-var collectionTime = "organization"
 
 type OrganizationRepository interface {
 	Store(time models.OrganizationModel) (*mongo.InsertOneResult, error)
@@ -28,21 +25,27 @@ type OrganizationRepository interface {
 	DeleteOwned(id primitive.ObjectID, ownerID string) (*mongo.DeleteResult, error)
 }
 
-func NewOrganizationRepository(db *mongo.Client) OrganizationRepository {
-	return &organizationRepository{DB: db}
+func NewOrganizationRepository(db *mongo.Database) OrganizationRepository {
+	return &organizationRepository{
+		orgs:  db.Collection(collOrganizations),
+		users: db.Collection(collUsers),
+		items: db.Collection(collItems),
+	}
 }
 
 type organizationRepository struct {
-	DB *mongo.Client
+	orgs  *mongo.Collection
+	users *mongo.Collection
+	items *mongo.Collection
 }
 
 func (r *organizationRepository) Store(time models.OrganizationModel) (*mongo.InsertOneResult, error) {
-	result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionTime).InsertOne(context.TODO(), time)
+	result, err := r.orgs.InsertOne(context.TODO(), time)
 	return result, err
 }
 
 func (r *organizationRepository) FindAll(filter bson.D, findOptions *options.FindOptions) ([]models.OrganizationModel, error) {
-	cursor, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionTime).Find(context.TODO(), filter, findOptions)
+	cursor, err := r.orgs.Find(context.TODO(), filter, findOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +58,7 @@ func (r *organizationRepository) FindAll(filter bson.D, findOptions *options.Fin
 
 func (r *organizationRepository) FindOne(filter bson.D) (models.OrganizationModel, error) {
 	result := models.OrganizationModel{}
-	err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionTime).FindOne(context.TODO(), filter).Decode(&result)
+	err := r.orgs.FindOne(context.TODO(), filter).Decode(&result)
 	if err == mongo.ErrNoDocuments {
 		return result, newPublicError("not find org")
 	}
@@ -66,7 +69,7 @@ func (r *organizationRepository) FindAllMyOrgs(_id string, page int64, limit int
 	findOptions := options.Find()
 	findOptions.SetLimit(limit)
 	findOptions.SetSkip(limit * page)
-	cursor, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionTime).Find(context.TODO(),
+	cursor, err := r.orgs.Find(context.TODO(),
 		bson.D{{
 			"$or", bson.A{
 				bson.D{{"ownerId", _id}}, bson.D{{"users._id", _id}},
@@ -84,7 +87,7 @@ func (r *organizationRepository) FindAllMyOrgs(_id string, page int64, limit int
 }
 
 func (r *organizationRepository) Delete(filter bson.D) (*mongo.DeleteResult, error) {
-	result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionTime).DeleteOne(context.TODO(), filter)
+	result, err := r.orgs.DeleteOne(context.TODO(), filter)
 	if err != nil {
 		return nil, err
 	}
@@ -96,18 +99,17 @@ func (r *organizationRepository) Delete(filter bson.D) (*mongo.DeleteResult, err
 
 func (r *organizationRepository) FindByFilter(filter bson.D) (models.OrganizationModel, error) {
 	result := models.OrganizationModel{}
-	err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionTime).FindOne(context.TODO(), filter).Decode(&result)
+	err := r.orgs.FindOne(context.TODO(), filter).Decode(&result)
 	return result, err
 }
 
 // AddUser adiciona um usuário (por email) à organização id, somente se ownerID
 // for o dono. Sem upsert: uma organização inexistente/apagada nunca é recriada.
 func (r *organizationRepository) AddUser(user dtos.AddUserOrganizationDTO, id primitive.ObjectID, ownerID interface{}) (models.OrganizationModel, error) {
-	db := r.DB.Database(os.Getenv("MONGO_DATABASE"))
 	doc := models.OrganizationModel{}
 
 	userCheck := models.User{}
-	errUser := db.Collection(collectionUser).FindOne(context.TODO(),
+	errUser := r.users.FindOne(context.TODO(),
 		// Só contas com email confirmado podem ser adicionadas: sem isso, quem
 		// cadastrasse o email de outra pessoa entraria na organização no lugar dela.
 		bson.D{{"email", NormalizeEmail(user.Email)}, {"active", true}, {"emailVerified", bson.D{{"$ne", false}}}},
@@ -125,7 +127,7 @@ func (r *organizationRepository) AddUser(user dtos.AddUserOrganizationDTO, id pr
 	}
 
 	after := options.After
-	err := db.Collection(collectionTime).FindOneAndUpdate(
+	err := r.orgs.FindOneAndUpdate(
 		context.TODO(),
 		bson.D{
 			{"_id", id},
@@ -151,7 +153,7 @@ func (r *organizationRepository) RemoveUser(userId string, id primitive.ObjectID
 		return doc, newPublicError("not possible remove")
 	}
 	after := options.After
-	err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collectionTime).FindOneAndUpdate(
+	err := r.orgs.FindOneAndUpdate(
 		context.TODO(),
 		bson.D{{"_id", id}, {"ownerId", ownerID}},
 		bson.D{{"$pull", bson.D{{"users", bson.D{{"_id", userId}}}}}},
@@ -166,15 +168,14 @@ func (r *organizationRepository) RemoveUser(userId string, id primitive.ObjectID
 // DeleteOwned apaga a organização id se ownerID for o dono. Os itens dela
 // viram itens privados do autor: ninguém perde dados e ex-membros perdem acesso.
 func (r *organizationRepository) DeleteOwned(id primitive.ObjectID, ownerID string) (*mongo.DeleteResult, error) {
-	db := r.DB.Database(os.Getenv("MONGO_DATABASE"))
-	result, err := db.Collection(collectionTime).DeleteOne(context.TODO(), bson.D{{"_id", id}, {"ownerId", ownerID}})
+	result, err := r.orgs.DeleteOne(context.TODO(), bson.D{{"_id", id}, {"ownerId", ownerID}})
 	if err != nil {
 		return nil, err
 	}
 	if result.DeletedCount == 0 {
 		return result, newPublicError("not possible delete org")
 	}
-	_, err = db.Collection(collection).UpdateMany(context.TODO(),
+	_, err = r.items.UpdateMany(context.TODO(),
 		bson.D{{"organizationId", id.Hex()}},
 		bson.D{
 			{"$set", bson.D{{"organizationId", ""}, {"private", true}}},

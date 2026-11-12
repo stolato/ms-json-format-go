@@ -1,8 +1,8 @@
 package handlers
 
 import (
-	"api-go/dtos"
 	"api-go/internal/access"
+	"api-go/internal/dtos"
 	"api-go/internal/models"
 	"api-go/internal/repositories"
 	"errors"

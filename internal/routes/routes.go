@@ -1,66 +1,44 @@
 package routes
 
 import (
-	"api-go/internal/database"
 	"api-go/internal/handlers"
 	"api-go/internal/middleware"
 	"api-go/internal/repositories"
-	"log"
 
 	"github.com/gofiber/fiber/v3"
 )
 
-func SetupRoutes(app *fiber.App) {
-	db := database.DB
-
-	//Init Repositories
-	itemsRepo := repositories.NewItemsRepository(db)
-	if err := itemsRepo.EnsureIndexes(); err != nil {
-		log.Println("items: falha ao criar índice de slug:", err)
-	}
-	userRepo := repositories.NewUserRepository(db)
-	orgRepo := repositories.NewOrganizationRepository(db)
-	if err := userRepo.EnsureIndexes(); err != nil {
-		log.Println("users: falha ao criar índice único de email (há emails duplicados?):", err)
-	}
-	verificationRepo := repositories.NewEmailVerificationRepository(db)
-	if err := verificationRepo.EnsureIndexes(); err != nil {
-		log.Println("email_verifications: falha ao criar índices:", err)
-	}
-	sessionRepo := repositories.NewSessionRepository(db)
-	if err := sessionRepo.EnsureIndexes(); err != nil {
-		log.Println("sessions: falha ao criar índices:", err)
-	}
-
-	//Init Handlers
-	itemsHandler := handlers.NewItemsHandler(itemsRepo, orgRepo)
-	authHandler := handlers.NewAuthHandler(userRepo, sessionRepo, verificationRepo)
-	userHandler := handlers.NewUserHandler(userRepo)
-	orgHandler := handlers.NewOrganizationHandler(orgRepo)
+// SetupRoutes registra as rotas HTTP. Repositórios e autenticação são criados
+// pelo chamador (cmd/main.go) e compartilhados com o websocket.
+func SetupRoutes(app *fiber.App, repos *repositories.Repositories, authMW *middleware.Auth, appURL string) {
+	itemsHandler := handlers.NewItemsHandler(repos.Items, repos.Organizations)
+	authHandler := handlers.NewAuthHandler(repos.Users, repos.Sessions, repos.EmailVerifications, appURL)
+	userHandler := handlers.NewUserHandler(repos.Users)
+	orgHandler := handlers.NewOrganizationHandler(repos.Organizations)
 
 	// Routes
-	app.Get("/items/:id", middleware.OptionalAuthMiddleware, itemsHandler.Show)
-	app.Put("/items/:id", middleware.OptionalAuthMiddleware, middleware.UpdateItemRateLimit, itemsHandler.UpdateItem)
-	app.Post("/items/:id/reveal", middleware.OptionalAuthMiddleware, middleware.RevealItemRateLimit, itemsHandler.Reveal)
-	app.Post("/items", middleware.OptionalAuthMiddleware, middleware.CreateItemRateLimit, itemsHandler.Store)
+	app.Get("/items/:id", authMW.Optional, itemsHandler.Show)
+	app.Put("/items/:id", authMW.Optional, middleware.UpdateItemRateLimit, itemsHandler.UpdateItem)
+	app.Post("/items/:id/reveal", authMW.Optional, middleware.RevealItemRateLimit, itemsHandler.Reveal)
+	app.Post("/items", authMW.Optional, middleware.CreateItemRateLimit, itemsHandler.Store)
 	app.Post("/auth", middleware.LoginRateLimit, middleware.LoginFailuresPerEmail, authHandler.Login)
 	app.Post("/register", middleware.RegisterRateLimit, authHandler.Register)
 	app.Post("/refresh", middleware.RefreshRateLimit, authHandler.RefreshToken)
 	app.Post("/logout", authHandler.Logout)
-	app.Post("/logout-all", middleware.AuthMiddleware, authHandler.LogoutAll)
+	app.Post("/logout-all", authMW.Required, authHandler.LogoutAll)
 	app.Post("/verify-email", middleware.VerifyEmailRateLimit, authHandler.VerifyEmail)
-	app.Post("/verify-email/resend", middleware.AuthMiddleware, authHandler.ResendVerification)
+	app.Post("/verify-email/resend", authMW.Required, authHandler.ResendVerification)
 
-	userRouter := app.Group("/user", middleware.AuthMiddleware)
+	userRouter := app.Group("/user", authMW.Required)
 	userRouter.Get("/me", userHandler.Me)
 	userRouter.Get("/settings", userHandler.GetSettings)
 	userRouter.Put("/settings", userHandler.UpdateSettings)
 
-	itemsRouter := app.Group("/items", middleware.AuthMiddleware)
+	itemsRouter := app.Group("/items", authMW.Required)
 	itemsRouter.Get("/", itemsHandler.AllItems)
 	itemsRouter.Delete("/:id", itemsHandler.DeleteItem)
 
-	organizationRouter := app.Group("/organization", middleware.AuthMiddleware)
+	organizationRouter := app.Group("/organization", authMW.Required)
 	organizationRouter.Get("/", orgHandler.FindAllTimes)
 	organizationRouter.Post("/", orgHandler.AddTime)
 	organizationRouter.Delete("/:id", orgHandler.DeleteOrganization)
@@ -68,6 +46,6 @@ func SetupRoutes(app *fiber.App) {
 	organizationRouter.Delete("/:id/users/:userId", orgHandler.RemoveUser)
 
 	app.Get("/", func(c fiber.Ctx) error {
-		return c.JSON(map[string]string{"name": "MS Items", "version": "1.1.0"})
+		return c.JSON(map[string]string{"name": "MS Items", "version": "1.2.0"})
 	})
 }

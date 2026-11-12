@@ -2,41 +2,31 @@ package main
 
 import (
 	"api-go/internal/auth"
+	"api-go/internal/config"
 	"api-go/internal/database"
 	"api-go/internal/encryption"
 	"api-go/internal/mailer"
 	"api-go/internal/middleware"
+	"api-go/internal/repositories"
 	"api-go/internal/routes"
 	"api-go/internal/socket"
 	"api-go/internal/tasks"
-	"api-go/internal/telemetry"
 	"context"
+	"errors"
 	"log"
 	"log/slog"
-	"net/http"
 	"os"
-	"path/filepath"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
-	"github.com/joho/godotenv"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.mongodb.org/mongo-driver/mongo"
 )
-
-func loadEnv() {
-	exe, _ := os.Executable()
-	exeDir := filepath.Dir(exe)
-
-	for _, path := range []string{".env", filepath.Join(exeDir, "../.env")} {
-		if err := godotenv.Overload(path); err == nil {
-			return
-		}
-	}
-}
 
 // fiberConfig define de onde vem o IP do cliente (usado pelo rate limit).
 //
@@ -47,104 +37,134 @@ func loadEnv() {
 // contrário qualquer cliente poderia forjá-lo para burlar o rate limit.
 // Prefira um header que o proxy SOBRESCREVE (X-Real-IP, CF-Connecting-IP):
 // com X-Forwarded-For o Fiber usa o primeiro IP da lista, que o cliente controla.
-func fiberConfig() fiber.Config {
-	cfg := fiber.Config{
+func fiberConfig(cfg config.Config) fiber.Config {
+	fc := fiber.Config{
 		// Evita conexões lentas/ociosas presas indefinidamente (slowloris).
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
-	header := strings.TrimSpace(os.Getenv("PROXY_HEADER"))
-	if header == "" {
-		return cfg
+	// config.Load já garante TRUSTED_PROXIES quando PROXY_HEADER está definido.
+	if cfg.ProxyHeader == "" {
+		return fc
 	}
-	var proxies []string
-	for _, p := range strings.Split(os.Getenv("TRUSTED_PROXIES"), ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			proxies = append(proxies, p)
-		}
-	}
-	if len(proxies) == 0 {
-		log.Fatal("PROXY_HEADER definido sem TRUSTED_PROXIES: o header poderia ser forjado por qualquer cliente")
-	}
-	if strings.EqualFold(header, fiber.HeaderXForwardedFor) {
+	if strings.EqualFold(cfg.ProxyHeader, fiber.HeaderXForwardedFor) {
 		slog.Warn("PROXY_HEADER=X-Forwarded-For: o primeiro IP da lista é controlado pelo cliente; prefira X-Real-IP definido pelo proxy")
 	}
-	cfg.ProxyHeader = header
-	cfg.TrustProxy = true
-	cfg.TrustProxyConfig = fiber.TrustProxyConfig{Proxies: proxies}
-	return cfg
+	fc.ProxyHeader = cfg.ProxyHeader
+	fc.TrustProxy = true
+	fc.TrustProxyConfig = fiber.TrustProxyConfig{Proxies: cfg.TrustedProxies}
+	return fc
 }
 
-// startMetricsServer expõe /metrics (Prometheus) em METRICS_ADDR.
-// Padrão 127.0.0.1:9091: só acessível de dentro do próprio host/container.
-// Em docker-compose de dev use METRICS_ADDR=:9091; METRICS_ADDR=off desliga.
-func startMetricsServer() {
-	addr := os.Getenv("METRICS_ADDR")
-	if addr == "" {
-		addr = "127.0.0.1:9091"
-	}
-	if addr == "off" {
-		return
-	}
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
-	go func() {
-		if err := srv.ListenAndServe(); err != nil {
-			slog.Error("metrics server error", "error", err)
-		}
-	}()
-}
+const (
+	// shutdownTimeout limita o encerramento inteiro. Precisa ser menor que o
+	// prazo entre SIGTERM e SIGKILL do orquestrador (Docker: 10s por padrão).
+	shutdownTimeout = 8 * time.Second
+)
 
 func main() {
-	loadEnv()
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
 
-	if err := encryption.Init(); err != nil {
-		log.Fatal(err)
-	}
-	if err := auth.Init(); err != nil {
-		log.Fatal(err)
-	}
-	if err := mailer.Init(); err != nil {
-		log.Fatal(err)
-	}
-
-	shutdown, err := telemetry.InitTracer()
+func run() error {
+	config.LoadDotEnv()
+	cfg, err := config.Load()
 	if err != nil {
-		slog.Warn("tracing unavailable", "error", err)
-	} else {
-		defer func() {
-			if err := shutdown(context.Background()); err != nil {
-				slog.Error("tracer shutdown error", "error", err)
-			}
-		}()
+		return err
 	}
 
-	startMetricsServer()
+	if err := encryption.Init(cfg.EncryptionKey); err != nil {
+		return err
+	}
+	if err := auth.Init(cfg.JWTSecret); err != nil {
+		return err
+	}
+	if err := mailer.Init(cfg.Mail); err != nil {
+		return err
+	}
 
-	app := fiber.New(fiberConfig())
+	// Ctrl+C / SIGTERM iniciam o encerramento. Um segundo sinal mata na hora
+	// (o stop() abaixo devolve o comportamento padrão).
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer stop()
+
+	client, err := database.Connect(ctx, cfg.MongoURI)
+	if err != nil {
+		return err
+	}
+	repos := repositories.New(client.Database(cfg.MongoDatabase), repositories.Options{
+		LegacyIDLinks: cfg.LegacyIDLinks,
+	})
+	if err := repos.EnsureIndexes(); err != nil {
+		log.Println("falha ao criar índices:", err)
+	}
+	authMW := middleware.NewAuth(repos.Sessions, repos.Users)
+
+	app := fiber.New(fiberConfig(cfg))
 	app.Use(logger.New())
 	app.Use(recover.New())
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: []string{"*"},
 	}))
 	app.Use(middleware.GlobalRateLimit)
-	app.Use(middleware.TracingMiddleware)
+	routes.SetupRoutes(app, repos, authMW, cfg.AppURL)
 
-	database.Connect()
+	scheduler, err := tasks.Start(repos.Items)
+	if err != nil {
+		return err
+	}
+	sock := socket.Start(":"+cfg.SocketPort, repos.Items, repos.Organizations, authMW.ValidateToken, cfg.SocketCORSOrigins)
 
-	go tasks.HandleTask()
+	httpErr := make(chan error, 1)
+	go func() {
+		httpErr <- app.Listen(":" + cfg.Port)
+	}()
 
-	go socket.SocketI()
+	// Espera um sinal ou a queda de um dos servidores.
+	var runErr error
+	select {
+	case <-ctx.Done():
+		slog.Info("sinal recebido, encerrando")
+	case err := <-httpErr:
+		runErr = err
+	case err := <-sock.Err():
+		runErr = err
+	}
+	stop()
 
-	routes.SetupRoutes(app)
-	log.Fatal(app.Listen(":" + os.Getenv("PORT")))
+	shutdown(app, sock, scheduler.Stop(), client)
+	return runErr
+}
+
+// shutdown encerra tudo em ordem, dentro de shutdownTimeout:
+//  1. HTTP: para de aceitar conexões e espera as requisições em andamento;
+//  2. websocket: desconecta os clientes;
+//  3. cron: espera a limpeza em andamento, se houver;
+//  4. emails assíncronos pendentes (disparados pelas requisições do passo 1);
+//  5. Mongo: por último, porque os passos anteriores ainda podem usá-lo.
+func shutdown(app *fiber.App, sock *socket.Server, cronDone context.Context, client *mongo.Client) {
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	if err := app.ShutdownWithContext(ctx); err != nil && !errors.Is(err, fiber.ErrNotRunning) {
+		slog.Error("shutdown: http", "error", err)
+	}
+	if err := sock.Shutdown(ctx); err != nil {
+		slog.Error("shutdown: websocket", "error", err)
+	}
+	select {
+	case <-cronDone.Done():
+	case <-ctx.Done():
+		slog.Error("shutdown: limpeza agendada não terminou a tempo")
+	}
+	if err := mailer.Wait(ctx); err != nil {
+		slog.Error("shutdown", "error", err)
+	}
+	if err := client.Disconnect(ctx); err != nil {
+		slog.Error("shutdown: mongo", "error", err)
+	}
+	slog.Info("encerrado")
 }

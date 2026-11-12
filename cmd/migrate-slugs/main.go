@@ -8,6 +8,7 @@
 package main
 
 import (
+	"api-go/internal/config"
 	"api-go/internal/database"
 	"api-go/internal/repositories"
 	"context"
@@ -15,7 +16,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -25,12 +25,19 @@ func main() {
 	dryRun := flag.Bool("dry-run", false, "apenas conta os itens que seriam migrados")
 	flag.Parse()
 
-	_ = godotenv.Overload(".env")
-	database.Connect()
+	config.LoadDotEnv()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
 	ctx := context.Background()
-	defer database.DB.Disconnect(ctx)
+	client, err := database.Connect(ctx, cfg.MongoURI)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Disconnect(ctx)
 
-	coll := database.DB.Database(os.Getenv("MONGO_DATABASE")).Collection("items")
+	coll := client.Database(cfg.MongoDatabase).Collection("items")
 	pending := bson.D{{"slug", bson.D{{"$exists", false}}}}
 
 	total, err := coll.CountDocuments(ctx, pending)

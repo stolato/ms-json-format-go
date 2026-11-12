@@ -8,8 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -27,7 +25,8 @@ type verifyEmailRequest struct {
 }
 
 // sendVerificationEmail cria um token de verificação e envia o link por email.
-// O envio é assíncrono para não atrasar o cadastro; falhas vão para o log.
+// O envio é assíncrono para não atrasar o cadastro (o shutdown espera ele
+// terminar); falhas vão para o log.
 func (a *AuthHandler) sendVerificationEmail(userID, email string) error {
 	token, hash, err := auth.NewOpaqueToken()
 	if err != nil {
@@ -36,13 +35,11 @@ func (a *AuthHandler) sendVerificationEmail(userID, email string) error {
 	if err := a.verifications.Create(hash, userID, email, time.Now().Add(emailVerificationTTL)); err != nil {
 		return err
 	}
-	link := strings.TrimRight(os.Getenv("APP_URL"), "/") + "/verify-email?token=" + token
+	link := a.appURL + "/verify-email?token=" + token
 	body := fmt.Sprintf("Olá!\r\n\r\nConfirme seu email acessando o link abaixo (válido por 24 horas):\r\n\r\n%s\r\n\r\nSe você não criou uma conta, ignore este email.\r\n", link)
-	go func() {
-		if err := mailer.Send(email, "Confirme seu email", body); err != nil {
-			slog.Error("falha ao enviar email de verificação", "user_id", userID, "error", err)
-		}
-	}()
+	mailer.SendAsync(email, "Confirme seu email", body, func(err error) {
+		slog.Error("falha ao enviar email de verificação", "user_id", userID, "error", err)
+	})
 	return nil
 }
 

@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -16,8 +15,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
-
-var collection = "items"
 
 type ItemsRepository interface {
 	FindAll(filter bson.D, page int64, limit int64) (ResultItems, error)
@@ -58,14 +55,12 @@ func IsSlug(s string) bool {
 	return err == nil && len(raw) == slugBytes
 }
 
-// legacyIDLinksEnabled: links antigos pelo _id continuam funcionando (só para
-// itens anteriores ao slug) até LEGACY_ID_LINKS=false.
-func legacyIDLinksEnabled() bool {
-	return os.Getenv("LEGACY_ID_LINKS") != "false"
-}
-
 type itemsRepository struct {
-	DB *mongo.Client
+	items *mongo.Collection
+	orgs  *mongo.Collection
+	// legacyIDLinks: links antigos pelo _id continuam funcionando (só para
+	// itens anteriores ao slug).
+	legacyIDLinks bool
 }
 
 type ResultItems struct {
@@ -75,9 +70,11 @@ type ResultItems struct {
 	Data       []models.Item `json:"data"`
 }
 
-func NewItemsRepository(db *mongo.Client) ItemsRepository {
+func NewItemsRepository(db *mongo.Database, legacyIDLinks bool) ItemsRepository {
 	return &itemsRepository{
-		DB: db,
+		items:         db.Collection(collItems),
+		orgs:          db.Collection(collOrganizations),
+		legacyIDLinks: legacyIDLinks,
 	}
 }
 
@@ -85,7 +82,7 @@ func (r *itemsRepository) FindAll(filter bson.D, page int64, limit int64) (Resul
 	findOptions := options.Find()
 	findOptions.SetLimit(limit)
 	findOptions.SetSkip(limit * page)
-	cursor, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).Find(context.TODO(), filter, findOptions)
+	cursor, err := r.items.Find(context.TODO(), filter, findOptions)
 	if err != nil {
 		return ResultItems{Page: page, Limit: limit}, err
 	}
@@ -99,18 +96,18 @@ func (r *itemsRepository) FindAll(filter bson.D, page int64, limit int64) (Resul
 			decryptErrs = append(decryptErrs, err)
 		}
 	}
-	count, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).CountDocuments(context.TODO(), filter)
+	count, err := r.items.CountDocuments(context.TODO(), filter)
 	return ResultItems{Data: results, Page: page, Limit: limit, TotalItems: int(count)}, errors.Join(append(decryptErrs, err)...)
 }
 
 func (r *itemsRepository) FindOne(_id primitive.ObjectID, update bool) (models.Item, error) {
 	result := models.Item{}
-	err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).FindOne(context.TODO(), bson.D{{"_id", _id}}).Decode(&result)
+	err := r.items.FindOne(context.TODO(), bson.D{{"_id", _id}}).Decode(&result)
 	if err == nil {
 		err = decryptItem(&result)
 	}
 	if update {
-		r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).FindOneAndUpdate(context.TODO(), bson.D{{Key: "_id", Value: result.Id}}, bson.D{{Key: "$set", Value: bson.D{
+		r.items.FindOneAndUpdate(context.TODO(), bson.D{{Key: "_id", Value: result.Id}}, bson.D{{Key: "$set", Value: bson.D{
 			{Key: "views", Value: result.Views + 1},
 			{Key: "expirateAt", Value: time.Now().AddDate(0, 0, 7)},
 			{Key: "updateAt", Value: time.Now()},
@@ -129,7 +126,7 @@ func (r *itemsRepository) AddItem(item models.Item) (*mongo.InsertOneResult, err
 		return nil, err
 	}
 	item.Json = encrypted
-	result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).InsertOne(context.TODO(), item)
+	result, err := r.items.InsertOne(context.TODO(), item)
 	return result, err
 }
 
@@ -147,7 +144,7 @@ func (r *itemsRepository) UpdateItem(item models.Item, _id primitive.ObjectID) (
 	opt := options.FindOneAndUpdateOptions{
 		ReturnDocument: &after,
 	}
-	result := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection("items").FindOneAndUpdate(context.TODO(), bson.D{{"_id", _id}}, update, &opt)
+	result := r.items.FindOneAndUpdate(context.TODO(), bson.D{{"_id", _id}}, update, &opt)
 	doc := models.Item{}
 	if err := result.Decode(&doc); err != nil {
 		return doc, err
@@ -158,14 +155,13 @@ func (r *itemsRepository) UpdateItem(item models.Item, _id primitive.ObjectID) (
 // DeleteItem apaga o item se user_id for o autor do item ou o dono da
 // organização do item. user_id vazio (uso interno, ex.: cron) apaga sem checar.
 func (r *itemsRepository) DeleteItem(_id primitive.ObjectID, user_id string) (*mongo.DeleteResult, error) {
-	db := r.DB.Database(os.Getenv("MONGO_DATABASE"))
 	if user_id == "" {
 		return r.delete(bson.D{{"_id", _id}})
 	}
 
 	// Lê só os campos de permissão (sem decifrar o conteúdo).
 	var item models.Item
-	err := db.Collection(collection).FindOne(context.TODO(), bson.D{{"_id", _id}},
+	err := r.items.FindOne(context.TODO(), bson.D{{"_id", _id}},
 		options.FindOne().SetProjection(bson.D{{"user_id", 1}, {"organizationId", 1}}),
 	).Decode(&item)
 	if err != nil {
@@ -176,7 +172,7 @@ func (r *itemsRepository) DeleteItem(_id primitive.ObjectID, user_id string) (*m
 	if !allowed && item.OrganizationId != "" {
 		orgID, errID := primitive.ObjectIDFromHex(item.OrganizationId)
 		if errID == nil {
-			count, errCount := db.Collection(collectionTime).CountDocuments(context.TODO(),
+			count, errCount := r.orgs.CountDocuments(context.TODO(),
 				bson.D{{"_id", orgID}, {"ownerId", user_id}})
 			allowed = errCount == nil && count > 0
 		}
@@ -196,7 +192,7 @@ func (r *itemsRepository) DeleteItem(_id primitive.ObjectID, user_id string) (*m
 }
 
 func (r *itemsRepository) EnsureIndexes() error {
-	_, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).Indexes().CreateOne(context.TODO(), mongo.IndexModel{
+	_, err := r.items.Indexes().CreateOne(context.TODO(), mongo.IndexModel{
 		Keys: bson.D{{"slug", 1}},
 		// Parcial: itens antigos ainda sem slug não entram no índice.
 		Options: options.Index().SetUnique(true).SetName("slug_unique").
@@ -210,7 +206,7 @@ func (r *itemsRepository) ResolveRef(ref string) (primitive.ObjectID, error) {
 	switch {
 	case IsSlug(ref):
 		filter = bson.D{{"slug", ref}}
-	case legacyIDLinksEnabled():
+	case r.legacyIDLinks:
 		_id, err := primitive.ObjectIDFromHex(ref)
 		if err != nil {
 			return primitive.NilObjectID, ErrItemNotFound
@@ -229,7 +225,7 @@ func (r *itemsRepository) ResolveRef(ref string) (primitive.ObjectID, error) {
 	var doc struct {
 		Id primitive.ObjectID `bson:"_id"`
 	}
-	err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).FindOne(context.TODO(), filter,
+	err := r.items.FindOne(context.TODO(), filter,
 		options.FindOne().SetProjection(bson.D{{"_id", 1}}),
 	).Decode(&doc)
 	if errors.Is(err, mongo.ErrNoDocuments) {
@@ -240,7 +236,7 @@ func (r *itemsRepository) ResolveRef(ref string) (primitive.ObjectID, error) {
 
 // IncrementViews conta uma visualização e renova a expiração do item.
 func (r *itemsRepository) IncrementViews(_id primitive.ObjectID) error {
-	_, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).UpdateOne(context.TODO(),
+	_, err := r.items.UpdateOne(context.TODO(),
 		bson.D{{"_id", _id}},
 		bson.D{
 			{"$inc", bson.D{{"views", 1}}},
@@ -255,7 +251,7 @@ func (r *itemsRepository) IncrementViews(_id primitive.ObjectID) error {
 
 func (r *itemsRepository) ConsumeViewOnce(_id primitive.ObjectID) (models.Item, error) {
 	var item models.Item
-	err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).FindOneAndDelete(context.TODO(),
+	err := r.items.FindOneAndDelete(context.TODO(),
 		bson.D{{"_id", _id}, {"viewOnce", true}},
 	).Decode(&item)
 	if errors.Is(err, mongo.ErrNoDocuments) {
@@ -273,7 +269,7 @@ var anonymousOwner = bson.D{{"$in", bson.A{"", nil}}}
 // DeleteExpiredAnonymous apaga itens expirados que são anônimos ou de
 // visualização única (estes expiram mesmo tendo dono, se nunca forem revelados).
 func (r *itemsRepository) DeleteExpiredAnonymous(now time.Time) (int64, error) {
-	result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).DeleteMany(context.TODO(), bson.D{
+	result, err := r.items.DeleteMany(context.TODO(), bson.D{
 		{"$or", bson.A{
 			bson.D{{"user_id", anonymousOwner}},
 			bson.D{{"viewOnce", true}},
@@ -287,7 +283,7 @@ func (r *itemsRepository) DeleteExpiredAnonymous(now time.Time) (int64, error) {
 }
 
 func (r *itemsRepository) delete(filter bson.D) (*mongo.DeleteResult, error) {
-	result, err := r.DB.Database(os.Getenv("MONGO_DATABASE")).Collection(collection).DeleteOne(context.TODO(), filter)
+	result, err := r.items.DeleteOne(context.TODO(), filter)
 	return result, err
 }
 

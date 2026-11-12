@@ -9,7 +9,4 @@
 .claude
 tmp
 *.log
-grafana
 docker-compose.yml
-prometheus.yml
-tempo.yml

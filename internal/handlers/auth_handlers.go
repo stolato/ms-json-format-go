@@ -1,8 +1,8 @@
 package handlers
 
 import (
-	"api-go/dtos"
 	"api-go/internal/auth"
+	"api-go/internal/dtos"
 	"api-go/internal/models"
 	"api-go/internal/repositories"
 	"log/slog"
@@ -19,13 +19,16 @@ type AuthHandler struct {
 	repo          repositories.UserRepository
 	sessions      repositories.SessionRepository
 	verifications repositories.EmailVerificationRepository
+	// appURL é a URL do front (sem barra final), usada nos links dos emails.
+	appURL string
 }
 
-func NewAuthHandler(repo repositories.UserRepository, sessions repositories.SessionRepository, verifications repositories.EmailVerificationRepository) *AuthHandler {
+func NewAuthHandler(repo repositories.UserRepository, sessions repositories.SessionRepository, verifications repositories.EmailVerificationRepository, appURL string) *AuthHandler {
 	return &AuthHandler{
 		repo:          repo,
 		sessions:      sessions,
 		verifications: verifications,
+		appURL:        appURL,
 	}
 }
 
